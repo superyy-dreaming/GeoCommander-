@@ -1,0 +1,41 @@
+{
+  "base": {
+    "behavior": "hold",
+    "lane_mode": "auto",
+    "movement": "max_range_kite",
+    "priority": "highest_threat",
+    "retreat_hp": 0.0,
+    "skill_cond": "on_cooldown",
+    "skill_usage": "hold",
+    "stance": "kite"
+  },
+  "rules": [
+    {
+      "actions": {
+        "skill_usage": "try"
+      },
+      "id": "r1",
+      "when": {
+        "all": [
+          {
+            "fact": "target_visible",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "target_distance",
+            "op": "lte",
+            "value": 650.0
+          },
+          {
+            "fact": "skill_ready",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      }
+    }
+  ],
+  "unit_type": "diamond",
+  "version": 1.0
+}

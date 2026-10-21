@@ -1,0 +1,36 @@
+{
+  "base": {
+    "behavior": "hold",
+    "lane_mode": "mid",
+    "movement": "midline_support",
+    "priority": "cluster",
+    "retreat_hp": 0.0,
+    "skill_cond": "cluster_3plus",
+    "skill_usage": "hold",
+    "stance": "balanced"
+  },
+  "rules": [
+    {
+      "actions": {
+        "skill_usage": "try"
+      },
+      "id": "try_skill_on_cluster_ready",
+      "when": {
+        "all": [
+          {
+            "fact": "target_cluster",
+            "op": "gte",
+            "value": 3.0
+          },
+          {
+            "fact": "skill_ready",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      }
+    }
+  ],
+  "unit_type": "circle",
+  "version": 1.0
+}

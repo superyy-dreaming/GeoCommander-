@@ -1,0 +1,53 @@
+{
+  "base": {
+    "behavior": "hold",
+    "lane_mode": "split",
+    "movement": "flank_sides",
+    "priority": "ranged_or_commander",
+    "retreat_hp": 0.0,
+    "skill_cond": "backstab_or_grav",
+    "skill_usage": "hold",
+    "stance": "flank"
+  },
+  "rules": [
+    {
+      "actions": {
+        "behavior": "retreat",
+        "skill_usage": "hold"
+      },
+      "id": "r1",
+      "when": {
+        "fact": "self_hp",
+        "op": "lt",
+        "value": 0.3
+      }
+    },
+    {
+      "actions": {
+        "skill_usage": "try"
+      },
+      "id": "r2",
+      "when": {
+        "all": [
+          {
+            "fact": "skill_ready",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "target_distance",
+            "op": "gte",
+            "value": 110.0
+          },
+          {
+            "fact": "target_distance",
+            "op": "lte",
+            "value": 340.0
+          }
+        ]
+      }
+    }
+  ],
+  "unit_type": "triangle",
+  "version": 1.0
+}

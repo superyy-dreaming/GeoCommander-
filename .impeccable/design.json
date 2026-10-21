@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-20T13:40:00.253829+00:00",
+  "title": "Design System: GeoCommander",
+  "extensions": {
+    "typographyMeta": {
+      "display": {
+        "displayName": "产品名",
+        "purpose": "首页产品名。字号为100%基准，由GameSettings统一换算。"
+      },
+      "headline": {
+        "displayName": "页面标题",
+        "purpose": "档案、设置与正式战术矩阵标题。"
+      },
+      "body": {
+        "displayName": "正文",
+        "purpose": "共享按钮、正文与可编辑字段。"
+      },
+      "label": {
+        "displayName": "辅助说明",
+        "purpose": "设置说明、工具提示与实验室结果。"
+      },
+      "readout": {
+        "displayName": "实验室紧凑读数",
+        "purpose": "实验室来源模型、JSON编辑、规则、事件及反馈；沿用系统中文字体。"
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "scene-fade",
+        "value": "0.18s",
+        "purpose": "场景切换淡出，实验室返回沿用；低动效为0秒。"
+      },
+      {
+        "name": "stat-transition",
+        "value": "0.25s, TRANS_QUAD / EASE_OUT",
+        "purpose": "档案属性条过渡；低动效为0秒。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "desktop-minimum",
+        "value": "1280×720 Godot window units"
+      },
+      {
+        "name": "academy-three-columns",
+        "value": "1600 Godot viewport width"
+      },
+      {
+        "name": "academy-wide-columns",
+        "value": "1900 Godot viewport width"
+      },
+      {
+        "name": "laboratory-three-columns",
+        "value": "1700 Godot viewport width, including 130% font scale"
+      }
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "几何指挥台",
+    "overview": "原生桌面几何 RTS，战场与实验室以 Operate 为主，菜单、兵种档案和规则读数兼有 Read。当前扩展采用 Redesign-Preserve：继承深色网格、青蓝控件、金色协同与清晰文字，用真实几何战场解释战术，不替换现有视觉身份。\n\n全部游戏视觉由几何和 shader 生成，只用系统字体，无外部图片、音频或打包字体。最低窗口为1280×720，面向键鼠操作；没有移动端或浅色主题。提示词实验室将编辑、校验、真实验证与正式开局应用分开呈现，状态与恢复动作优先于装饰。",
+    "keyCharacteristics": [
+      "深色几何战术台，青蓝操作与金色协同语义。",
+      "全局100/115/130%字号，受限区域独立滚动，保留阅读位置。",
+      "世界HDR与界面文字分层，沿用系统低动效设置。"
+    ],
+    "rules": [
+      {
+        "name": "The Clear Text Rule",
+        "body": "世界发光只表达几何与战斗状态，不影响标题、正文、输入值和按钮文字。",
+        "section": "colors"
+      },
+      {
+        "name": "The Stable Font Rule",
+        "body": "复用稳定生命周期的Theme/SystemFont，在设置事件中原地更新。字体改动后检查“敌、远”等简体字形及原生日志，不用替换文案掩盖缺字。",
+        "section": "typography"
+      },
+      {
+        "name": "The Bounded Reading Rule",
+        "body": "长正文、JSON、反馈和实时读数在各自区域内滚动；正文长度不能将取消、应用、关闭或底部消息挤出窗口。",
+        "section": "layout"
+      }
+    ],
+    "dos": [
+      "**Do** 复用CommanderTheme、稳定的系统字体、真实地图与战斗机制，保留几何指挥台的视觉身份。",
+      "**Do** 保持桌面窗口边界、独立滚动、固定取消与应用动作、清晰键盘焦点及HDR文字分层。",
+      "**Do** 用真实字段与按钮名解释错误、已保留内容和恢复动作；让实时读数保留用户阅读位置。",
+      "**Do** 在1280×720大字号及1920×1080三栏状态中检查原生截图与实际输入流程。"
+    ],
+    "donts": [
+      "**Don't** 引入外部图片、音频、打包字体，或虚构演武、截图、事件与战斗结果。",
+      "**Don't** 缩小全局字号掩盖布局越界，或让长正文把固定操作挤出窗口。",
+      "**Don't** 用替换中文文案掩盖缺字，把世界发光施加到正文，或将原生控件描述为运行时Web组件。",
+      "**Don't** 自动将生成结果应用到正式开局，或混同单兵种实验应用、单兵种开局与整队关键词提交。"
+    ]
+  }
+}

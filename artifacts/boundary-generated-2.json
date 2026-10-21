@@ -1,0 +1,15 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "boundary_infiltrate",
+    "priority": "diamond_first",
+    "retreat_hp": 0.0,
+    "skill_cond": "travel_and_backstab",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "rules": [],
+  "unit_type": "triangle",
+  "version": 1.0
+}

@@ -1,0 +1,61 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "mid",
+    "movement": "protect_hexagon",
+    "priority": "closest",
+    "retreat_hp": 0.0,
+    "skill_cond": "ally_threatened",
+    "skill_usage": "hold",
+    "stance": "balanced"
+  },
+  "rules": [
+    {
+      "actions": {
+        "behavior": "retreat",
+        "skill_usage": "hold"
+      },
+      "id": "low_hp_retreat",
+      "when": {
+        "fact": "self_hp",
+        "op": "lte",
+        "value": 0.25
+      }
+    },
+    {
+      "actions": {
+        "behavior": "hold",
+        "skill_usage": "try"
+      },
+      "id": "shield_if_ready",
+      "when": {
+        "all": [
+          {
+            "fact": "skill_ready",
+            "op": "eq",
+            "value": true
+          },
+          {
+            "fact": "target_distance",
+            "op": "lte",
+            "value": 220.0
+          }
+        ]
+      }
+    },
+    {
+      "actions": {
+        "behavior": "hold",
+        "skill_usage": "hold"
+      },
+      "id": "default_hold",
+      "when": {
+        "fact": "self_hp",
+        "op": "gte",
+        "value": 0.0
+      }
+    }
+  ],
+  "unit_type": "square",
+  "version": 1.0
+}

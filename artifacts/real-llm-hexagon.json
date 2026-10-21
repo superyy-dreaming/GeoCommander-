@@ -1,0 +1,36 @@
+{
+  "base": {
+    "behavior": "hold",
+    "lane_mode": "auto",
+    "movement": "safe_backline",
+    "priority": "none",
+    "retreat_hp": 0.0,
+    "skill_cond": "always_pulse",
+    "skill_usage": "hold",
+    "stance": "defensive"
+  },
+  "rules": [
+    {
+      "actions": {
+        "skill_usage": "try"
+      },
+      "id": "heal_lowest_ally",
+      "when": {
+        "all": [
+          {
+            "fact": "ally_min_hp",
+            "op": "lt",
+            "value": 0.6
+          },
+          {
+            "fact": "skill_ready",
+            "op": "eq",
+            "value": true
+          }
+        ]
+      }
+    }
+  ],
+  "unit_type": "hexagon",
+  "version": 1.0
+}

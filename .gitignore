@@ -1,0 +1,19 @@
+.godot/
+.DS_Store
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/.gdignore
+# Small, credential-free replay fixtures from the verified model responses.
+!artifacts/boundary-generated-1.json
+!artifacts/boundary-generated-2.json
+!artifacts/boundary-generated-3.json
+!artifacts/real-llm-triangle.json
+!artifacts/real-llm-square.json
+!artifacts/real-llm-circle.json
+!artifacts/real-llm-diamond.json
+!artifacts/real-llm-hexagon.json
