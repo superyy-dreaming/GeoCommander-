@@ -5,7 +5,7 @@ extends CombatContext
 @export var map_id: String = ""
 
 enum Phase { PREPARING, PLAYING, ENDED }
-const WORLD_RECT: Rect2 = Rect2(0, 0, 2400, 1350)
+const WORLD_RECT: Rect2 = MapCatalog.WORLD_RECT
 var phase: int = Phase.PREPARING
 var flux: Array[float] = [180.0, 180.0]
 var bases: Array[CoreMatrixBase] = []
@@ -34,6 +34,8 @@ func _ready() -> void:
  TacticalBrain.begin_match_profiles()
  reduced_motion = bool(GameSettings.values["reduced_motion"])
  GameSettings.settings_changed.connect(_settings_updated)
+ flux_pickup_reported.connect(func(unit: BaseGeoUnit, amount: int) -> void:
+  if is_combat_active(): flux[unit.team] += amount)
  build_environment()
  build_bounds()
  unit_added.connect(func(unit: BaseGeoUnit) -> void:
@@ -54,14 +56,16 @@ func _ready() -> void:
   var base: CoreMatrixBase = CoreMatrixBase.new()
   base.team = team
   base.arena = self
-  base.position = Vector2(220.0 if team == 0 else 2180.0, 675.0)
+  base.position = MapCatalog.base_positions(map_id)[team]
+  base.set_meta("obstacle_id",MapCatalog.definition(map_id)["base_specs"][team]["id"])
   add_child(base)
   bases.append(base)
  for index: int in range(2):
   var prism: EnergyPrism = EnergyPrism.new()
   prism.arena = self
   prism.title = "NORTH" if index == 0 else "SOUTH"
-  prism.position = Vector2(1200, 320 if index == 0 else 1030)
+  prism.position = MapCatalog.prism_positions(map_id)[index]
+  prism.set_meta("obstacle_id",MapCatalog.definition(map_id)["prism_specs"][index]["id"])
   add_child(prism)
   prisms.append(prism)
   local_prisms.append(prism)
@@ -87,7 +91,7 @@ func profile_for(team: int) -> Dictionary:
  return TacticalBrain.team_profiles[team]
 
 func build_environment() -> void:
- background_material = CombatContext.create_environment(self,Rect2(-400,-400,3200,2150))
+ background_material = CombatContext.create_environment(self,MapCatalog.WORLD_RECT.grow(400.0))
  background_material.set_shader_parameter("reduced_motion",reduced_motion)
 
 func build_bounds() -> void:
@@ -95,7 +99,9 @@ func build_bounds() -> void:
  walls.collision_layer = 16
  walls.collision_mask = 3
  add_child(walls)
- var rectangles: Array[Rect2] = [Rect2(-40,-40,2480,40), Rect2(-40,1350,2480,40), Rect2(-40,0,40,1350), Rect2(2400,0,40,1350)]
+ var width: float = MapCatalog.WORLD_SIZE.x
+ var height: float = MapCatalog.WORLD_SIZE.y
+ var rectangles: Array[Rect2] = [Rect2(-40,-40,width+80,40), Rect2(-40,height,width+80,40), Rect2(-40,0,40,height), Rect2(width,0,40,height)]
  for rectangle: Rect2 in rectangles:
   var shape: CollisionShape2D = CollisionShape2D.new()
   var box: RectangleShape2D = RectangleShape2D.new()
@@ -106,6 +112,10 @@ func build_bounds() -> void:
 
 func start_match() -> void:
  if phase != Phase.PREPARING:
+  return
+ var plan_error: String = TacticPlan.profile_error(profile_for(0),map_id)
+ if not plan_error.is_empty():
+  notify(plan_error,true)
   return
  phase = Phase.PLAYING
  hud.call("close_matrix")
@@ -156,7 +166,7 @@ func spawn_unit(kind: String, team: int, spawn_pos: Vector2 = Vector2.INF, valid
  var serial: int = spawn_serial[team]
  var sign_x: float = 1.0 if team == 0 else -1.0
  unit.spawn_index = serial
- unit.position = Vector2(220 if team == 0 else 2180, 675) + Vector2(sign_x * (135.0 + float(serial % 3) * 65.0), float((serial / 3) % 7 - 3) * 72.0)
+ unit.position = MapCatalog.base_positions(map_id)[team] + Vector2(sign_x * (135.0 + float(serial % 3) * 65.0), float((serial / 3) % 7 - 3) * 72.0)
  if spawn_pos.is_finite():
   unit.position = spawn_pos
  if validate_position and not spawn_clear(unit.position,float(UnitCatalog.DATA[kind]["radius"])):
@@ -299,6 +309,7 @@ func cast_skill(skill: String, point: Vector2) -> bool:
   if not topology_swap(point):
    return false
  elif skill == "EMP_STRIKE":
+  reveal_targets(0,point,200.0)
   for enemy: BaseGeoUnit in units_for(1):
    if point.distance_to(enemy.global_position) <= 200.0:
     enemy.apply_emp(2.8)
@@ -356,6 +367,7 @@ func topology_swap(point: Vector2) -> bool:
   unit.external_velocity = Vector2.ZERO
   unit.boundary_maneuver.reset()
   unit.slow_sources.clear()
+  if is_instance_valid(terrain): terrain.refresh_regions(unit)
   if is_instance_valid(navigation):
    navigation.routes.erase(unit.get_instance_id())
    for field: EntropyField in navigation.fields:
@@ -494,7 +506,7 @@ func _draw() -> void:
  draw_rect(WORLD_RECT, Color(0.08,0.25,0.34,0.6), false, 2.0)
  for index: int in range(1, 8):
   draw_line(Vector2(index * 300, 0), Vector2(index * 300, 14), Color(0.18,0.42,0.55), 2.0)
-  draw_line(Vector2(index * 300, 1350), Vector2(index * 300, 1336), Color(0.18,0.42,0.55), 2.0)
+  draw_line(Vector2(index * 300, WORLD_RECT.size.y), Vector2(index * 300, WORLD_RECT.size.y-14), Color(0.18,0.42,0.55), 2.0)
  if not selected_skill.is_empty() and phase == Phase.PLAYING:
   var point: Vector2 = get_global_mouse_position()
   var radius: float = UnitCatalog.SKILLS[selected_skill]["radius"]

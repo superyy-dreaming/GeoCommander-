@@ -41,9 +41,27 @@ var selected: bool = false
 var scripted_control: bool = false
 var scripted_direction: Vector2 = Vector2.ZERO
 var slow_sources: Dictionary = {}
+var nebula_ids: Array[String] = []
+var revealed_until: Dictionary = {}
+var teleport_cooldown: float = 0.0
+var portal_boost_left: float = 0.0
+var portal_used_count: int = 0
+var flux_collected_count: int = 0
+var scan_left: float = 0.0
+var scan_serial: int = 0
+var active_velocity: Vector2 = Vector2.ZERO
+var gate_push_velocity: Vector2 = Vector2.ZERO
 var spawn_index: int = 0
 var avoid_side: float = 0.0
 var avoid_until: int = 0
+var execution: TacticExecution
+var attack_serial: int = 0
+var skill_serial: int = 0
+var skill_complete_serial: int = -1
+var skill_interrupted_serial: int = -1
+var skill_active: bool = false
+var requested_skill: Dictionary = {}
+var skill_rejection: String = ""
 var boundary_maneuver: BoundaryManeuver = BoundaryManeuver.new()
 
 func _ready() -> void:
@@ -95,6 +113,7 @@ func _ready() -> void:
  base_rule = (arena.profile_for(team)["unit_rules"][unit_type] as Dictionary).duplicate(true)
  rule = base_rule.duplicate(true)
  arena.profile_changed.connect(_profile_updated)
+ reset_execution()
  arena.register_unit(self)
 
 func _profile_updated(changed_team: int, profile: Dictionary) -> void:
@@ -103,18 +122,36 @@ func _profile_updated(changed_team: int, profile: Dictionary) -> void:
   rule = base_rule.duplicate(true)
   decision_left = 0.0
   boundary_maneuver.reset()
+  reset_execution()
+
+func reset_execution() -> void:
+ execution = null
+ var program: Dictionary = base_rule.get("program",{})
+ if int(program.get("version",1)) == 2:
+  execution = TacticExecution.new()
+  execution.install(program)
+
+func is_plan_controlled() -> bool:
+ return execution != null and not execution.use_base and not scripted_control
 
 func enemies() -> Array[BaseGeoUnit]:
- return arena.units_for(1-team)
+ return arena.perceived_enemies(self)
 
 func allies() -> Array[BaseGeoUnit]:
  return arena.units_for(team)
 
-func terrain_multiplier() -> float:
+func actual_enemies() -> Array[BaseGeoUnit]:
+ return arena.units_for(1-team)
+
+func terrain_multiplier(direction: Vector2 = Vector2.ZERO) -> float:
  var multiplier: float = 1.0
  for value: float in slow_sources.values():
   multiplier = minf(multiplier,value)
+ if is_instance_valid(arena.terrain): multiplier *= arena.terrain.speed_multiplier(self,direction)
  return multiplier
+
+func try_scan() -> bool:
+ return false
 
 func try_cast_skill() -> bool:
  return false
@@ -126,22 +163,28 @@ func _physics_process(delta: float) -> void:
  var recovery: float = (1.25 if buff_left > 0.0 else 1.0) * (2.0 if overclock_left > 0.0 else 1.0)
  attack_left = maxf(0.0, attack_left - delta * (1.25 if buff_left > 0.0 else 1.0))
  skill_left = maxf(0.0, skill_left - delta * recovery)
+ scan_left = maxf(0.0,scan_left-delta)
  buff_left = maxf(0.0, buff_left - delta)
  overclock_left = maxf(0.0, overclock_left - delta)
  stun_left = maxf(0.0, stun_left - delta)
  under_attack_left = maxf(0.0, under_attack_left - delta)
+ if is_plan_controlled():
+  var plan_started: int = Time.get_ticks_usec()
+  execution.tick(self,delta)
+  arena.plan_usec += Time.get_ticks_usec()-plan_started
  decision_left -= delta
- if decision_left <= 0.0 and not scripted_control:
+ if decision_left <= 0.0 and not scripted_control and not is_plan_controlled():
   decide_tactic()
   decision_left = 0.15
  if stun_left > 0.0:
-  velocity = external_velocity
+  velocity = external_velocity+gate_push_velocity
   move_and_slide()
  else:
   tick_unit(delta)
   if not arena.is_combat_active() or dead:
    return
-  velocity = movement_velocity(delta) + external_velocity
+  active_velocity = movement_velocity(delta)
+  velocity = active_velocity + external_velocity+gate_push_velocity
   move_and_slide()
  external_velocity = external_velocity.move_toward(Vector2.ZERO, 900.0 * delta)
  if velocity.length_squared() > 25.0:
@@ -162,6 +205,7 @@ func decide_tactic() -> void:
  rule = base_rule.duplicate(true)
  var program: Dictionary = base_rule.get("program",{})
  if not program.is_empty(): rule = program["base"].duplicate(true)
+ if int(program.get("version",1)) == 2: program = {}
  evaluate_best_target()
  if program.is_empty():
   arena.tactic_usec += Time.get_ticks_usec()-started
@@ -198,10 +242,18 @@ func tactic_facts() -> Dictionary:
   distance = global_position.distance_to(current_target.global_position)
   var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position,current_target.global_position,4|16,arena.friendly_shield_rids(team))
   visible = get_world_2d().direct_space_state.intersect_ray(query).is_empty()
- return {"self_hp":current_hp/max_hp,"target_hp":hp,"target_type":kind,"target_distance":distance,"nearby_allies":ally_count,"nearby_enemies":enemy_count,"ally_min_hp":lowest,"hexagon_alive":has_hex,"skill_ready":skill_left<=0 and stun_left<=0,"target_visible":visible,"target_cluster":cluster}
+ return {"self_hp":current_hp/max_hp,"target_hp":hp,"target_type":kind,"target_distance":distance,"nearby_allies":ally_count,"nearby_enemies":enemy_count,"ally_min_hp":lowest,"hexagon_alive":has_hex,"skill_ready":skill_left<=0 and stun_left<=0,"target_visible":visible,"target_cluster":cluster,"scan_ready":unit_type=="hexagon" and scan_left<=0 and stun_left<=0,"in_nebula":not nebula_ids.is_empty(),"portal_ready":teleport_cooldown<=0,"reactor_warning":is_instance_valid(arena.terrain) and arena.terrain.warning_at(self),"portal_available":is_instance_valid(arena.terrain) and arena.terrain.portal_available(self),"gate_open":is_instance_valid(arena.terrain) and arena.terrain.any_gate_open(),"portal_used":portal_used_count>0,"flux_collected":flux_collected_count>0}
 
 func automatic_skill() -> bool:
- if String(rule.get("skill_usage","auto")) == "hold":
+ if is_plan_controlled():
+  if execution.skill_policy == "hold" or skill_active: return false
+  if execution.skill_policy == "travel":
+   var heading: Vector2 = execution.move_direction if execution.direct else global_position.direction_to(execution.goal) if execution.goal.is_finite() else Vector2.ZERO
+   if heading.is_zero_approx(): return false
+   var result: Dictionary = SkillRequest.attempt(self,{"aim":"direction","direction":"angle","angle":rad_to_deg(heading.angle()),"purpose":"travel"})
+   action_blocked = result["message"]
+   return result["ok"]
+ if not is_plan_controlled() and String(rule.get("skill_usage","auto")) == "hold":
   action_blocked = "规则保留技能"
   return false
  if stun_left > 0 or dead or not arena.is_combat_active():
@@ -215,7 +267,22 @@ func automatic_skill() -> bool:
  return success
 
 func skill_started() -> void:
+ skill_serial += 1
+ skill_active = true
  arena.skill_reported.emit(self)
+ arena.skill_lifecycle.emit(self,"started",skill_serial,"")
+
+func skill_finished() -> void:
+ if not skill_active: return
+ skill_active = false
+ skill_complete_serial = skill_serial
+ arena.skill_lifecycle.emit(self,"completed",skill_serial,"")
+
+func skill_interrupted(reason: String) -> void:
+ if not skill_active: return
+ skill_active = false
+ skill_interrupted_serial = skill_serial
+ arena.skill_lifecycle.emit(self,"interrupted",skill_serial,reason)
 
 func evaluate_best_target() -> void:
  var best: float = -INF
@@ -246,8 +313,13 @@ func evaluate_best_target() -> void:
   current_target = arena.base_for(1-team)
 
 func movement_velocity(delta: float) -> Vector2:
+ if is_plan_controlled():
+  var planned: Vector2 = execution.movement(self)
+  # Direction segments never invoke steering or inherit the old pursuit velocity.
+  if not execution.direct: planned = whisker_steering(planned)
+  return planned * move_speed * terrain_multiplier(planned) * (1.6 if overclock_left>0 else 1.0)
  if scripted_control:
-  return scripted_direction.limit_length(1.0) * move_speed * terrain_multiplier() * (1.6 if overclock_left > 0 else 1.0)
+  return scripted_direction.limit_length(1.0) * move_speed * terrain_multiplier(scripted_direction) * (1.6 if overclock_left > 0 else 1.0)
  var desired: Vector2 = Vector2.ZERO
  var movement: String = String(rule.get("movement", "direct_charge"))
  var stance: String = String(rule.get("stance",arena.profile_for(team).get("stance","balanced")))
@@ -270,9 +342,9 @@ func movement_velocity(delta: float) -> Vector2:
   goal = arena.call("objective_for", self)
   if global_position.distance_to(goal) > 25.0: intent = "objective"
   var target_distance: float = INF
-  if is_instance_valid(current_target):
+  if target_valid():
    target_distance = global_position.distance_to(current_target.global_position)
-  var use_target: bool = is_instance_valid(current_target) and target_distance < 540.0
+  var use_target: bool = target_valid() and target_distance < 540.0
   if use_target:
    var stop_range: float = attack_range * 0.85
    if current_target is CoreMatrixBase: stop_range += 58.0
@@ -311,6 +383,12 @@ func movement_velocity(delta: float) -> Vector2:
    if current_hp / max_hp <= float(rule.get("retreat_hp", 0.0)) or (unit_type == "diamond" and nearest_distance < 220.0) or (base_rule.has("program") and stance == "kite" and attack_range > 100 and nearest_distance < attack_range*0.75):
     desired = -global_position.direction_to(nearest_enemy.global_position)
     intent = ""
+ if is_instance_valid(arena.terrain) and behavior!="hold":
+  var terrain_goal: Vector2 = arena.terrain.strategy_goal(self,goal)
+  if terrain_goal.is_finite() and terrain_goal!=goal:
+   goal=terrain_goal
+   intent="terrain:"+str(rule.get("terrain_strategy","auto"))
+   flank=false
  if not intent.is_empty():
   desired = arena.routed_direction(self,goal,intent)
   if flank: desired = (desired + desired.orthogonal() * flank_sign * 0.65).normalized()
@@ -327,19 +405,21 @@ func movement_velocity(delta: float) -> Vector2:
    separation += offset / distance * (1.0 - distance / minimum) * 2.8
  desired = (desired + separation).limit_length(1.0)
  desired = whisker_steering(desired)
- var speed: float = move_speed * terrain_multiplier() * (1.6 if overclock_left > 0.0 else 1.0)
- return velocity.lerp(desired * speed, minf(1.0, delta * 10.0))
+ var speed: float = move_speed * terrain_multiplier(desired) * (1.6 if overclock_left > 0.0 else 1.0)
+ return active_velocity.lerp(desired * speed, minf(1.0, delta * 10.0))
 
 func tick_unit(_delta: float) -> void:
  if not scripted_control: basic_attack()
 
 func basic_attack() -> void:
+ if is_plan_controlled() and not execution.allow_attack: return
  if attack_left > 0.0 or attack_damage <= 0.0 or not target_valid():
   return
  var extra: float = 60.0 if current_target is CoreMatrixBase else 0.0
  if global_position.distance_to(current_target.global_position) > attack_range + extra:
   return
  attack_left = attack_cd
+ attack_serial += 1
  if unit_type in ["circle", "diamond"]:
   var projectile: GeoProjectile = GeoProjectile.new()
   projectile.arena = arena
@@ -367,7 +447,7 @@ func basic_attack() -> void:
  TransientVFX.effect(arena,endpoint,rim_color,"shatter" if unit_type == "triangle" else "ring",22.0,0.2)
 
 func target_valid() -> bool:
- return is_instance_valid(current_target) and not bool(current_target.get("dead"))
+ return is_instance_valid(current_target) and not bool(current_target.get("dead")) and (not current_target is BaseGeoUnit or not is_instance_valid(arena.terrain) or arena.terrain.can_perceive(self,current_target))
 
 func take_damage(amount: float, _attacker: Node2D = null) -> void:
  if dead or not arena.is_combat_active():
@@ -395,6 +475,7 @@ func heal(amount: float) -> void:
 
 func apply_emp(duration: float) -> void:
  stun_left = maxf(stun_left, duration)
+ skill_interrupted("EMP中断")
  cancel_active_skill()
 
 func cancel_active_skill() -> void:
@@ -403,6 +484,7 @@ func cancel_active_skill() -> void:
 func die() -> void:
  if dead:
   return
+ skill_interrupted("单位阵亡")
  dead = true
  remove_from_group("units")
  remove_from_group("units_team_" + str(team))
@@ -410,6 +492,10 @@ func die() -> void:
  collision_mask = 0
  TransientVFX.spawn_shatter(arena, global_position, rim_color, unit_radius)
  slow_sources.clear()
+ nebula_ids.clear()
+ revealed_until.clear()
+ portal_boost_left=0
+ gate_push_velocity=Vector2.ZERO
  arena.unregister_unit(self)
  queue_free()
 
@@ -421,7 +507,7 @@ func whisker_steering(desired: Vector2) -> Vector2:
  var avoidance: Vector2 = Vector2.ZERO
  var space: PhysicsDirectSpaceState2D = get_world_2d().direct_space_state
  for offset: float in [0.0,-38.0,38.0]:
-  var length: float = unit_radius + (65.0 if offset == 0.0 else 50.0)
+  var length: float = unit_radius + 60.0
   var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position,global_position+direction.rotated(deg_to_rad(offset))*length,16)
   var hit: Dictionary = space.intersect_ray(query)
   if is_instance_valid(arena.navigation): arena.navigation.whisker_queries += 1
@@ -446,6 +532,19 @@ func _exit_tree() -> void:
   if is_instance_valid(arena.navigation): arena.navigation.routes.erase(get_instance_id())
 
 func _draw() -> void:
+ var faction_color: Color = ProceduralGeo.BLUE if team == 0 else ProceduralGeo.RED
+ # The badge is deliberately independent from the unit silhouette and rim
+ # color, so faction remains legible in dense fights and for color-blind users.
+ draw_circle(Vector2.ZERO,5.5,faction_color.darkened(0.42))
+ draw_arc(Vector2.ZERO,5.5,0,TAU,16,Color.WHITE,1.0,true)
+ var font: Font = ThemeDB.fallback_font
+ draw_string(font,Vector2(-4.5,4.0),"B" if team == 0 else "R",HORIZONTAL_ALIGNMENT_CENTER,9,8,Color.WHITE)
+ if selected:
+  var title: String = ("蓝方" if team == 0 else "红方")+" · "+str(UnitCatalog.DATA[unit_type]["zh"])
+  var width: float = maxf(78.0,GameSettings.font_px(14)*title.length()*0.58)
+  draw_rect(Rect2(-width*0.5,-unit_radius-25.0,width,18.0),Color(0.015,0.03,0.05,0.92),true)
+  draw_rect(Rect2(-width*0.5,-unit_radius-25.0,width,18.0),faction_color, false,1.0)
+  draw_string(font,Vector2(-width*0.5+5.0,-unit_radius-11.0),title,HORIZONTAL_ALIGNMENT_LEFT,width-10.0,GameSettings.font_px(11),Color.WHITE)
  if not slow_sources.is_empty():
   draw_arc(Vector2.ZERO,unit_radius+7.0,0,TAU,24,Color(1.8,0.9,0.1),2.0,true)
  if stun_left > 0.0:

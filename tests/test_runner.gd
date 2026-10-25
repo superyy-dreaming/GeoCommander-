@@ -239,8 +239,8 @@ func run_tests() -> void:
  var length: float = 0.0
  for index: int in range(beam.size()-1): length += beam[index].distance_to(beam[index+1])
  check(int(diamond.get("last_beam_bounces")) == 2 and beam.size() == 4 and length <= 750.1, "激光恰好两次反射且总长不超过 750px")
- check(is_equal_approx(target.current_hp,375.0), "多段激光对重复路径目标只结算一次")
- check(is_equal_approx(reflected_target.current_hp,460.0-85.0*1.35), "反射段伤害乘以 1.35")
+ check(is_equal_approx(target.current_hp,460.0-85.0*1.35*1.35), "多段激光对重复路径目标只结算一次")
+ check(is_equal_approx(reflected_target.current_hp,460.0-85.0*1.35*1.35), "重叠反射段取最高倍率 1.35²")
  for node: Node in get_tree().get_nodes_in_group("barriers"): node.queue_free()
  await clear_units()
  var shooter: BaseGeoUnit = spawn("circle",0,Vector2(200,850))

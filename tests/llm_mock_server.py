@@ -1,6 +1,7 @@
 """Local-only OpenAI-compatible protocol fixture. Never logs headers or request bodies."""
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import json, time
+from pathlib import Path
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_): pass
     def reply(self, code, data):
@@ -26,5 +27,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(data.get('messages', [])) > 1:
             content = json.dumps({'version':1,'unit_type':'triangle','base':{'movement':'flank_sides','priority':'ranged_or_commander','skill_cond':'backstab_or_grav','retreat_hp':.2,'lane_mode':'auto','stance':'balanced','behavior':'normal','skill_usage':'auto'},'rules':[{'id':'low_hp','when':{'fact':'self_hp','op':'lt','value':.3},'actions':{'behavior':'retreat'}}]})
         if model == 'bad-json': content = '```json\n{}\n```'
+        if model in ('plan-v2', 'plan-v2-invalid'):
+            plan = json.loads((Path(__file__).parent / 'fixtures/tactic-v2-triangle.json').read_text())
+            if model == 'plan-v2-invalid': plan['plan']['steps'][0]['speed'] = 999
+            content = json.dumps(plan, ensure_ascii=False)
         self.reply(200, {'choices': [{'message': {'content': content}}]})
 ThreadingHTTPServer(('127.0.0.1', 18741), Handler).serve_forever()

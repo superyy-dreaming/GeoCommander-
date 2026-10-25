@@ -1,0 +1,78 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "max_range_kite",
+    "priority": "highest_threat",
+    "retreat_hp": 0.45,
+    "skill_cond": "refract_or_snipe",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "plan": {
+    "entry": "cover",
+    "finish": "hold",
+    "interrupts": [
+      {
+        "goto": "escape",
+        "id": "critical",
+        "when": {
+          "fact": "self_hp",
+          "op": "lt",
+          "value": 0.3
+        }
+      }
+    ],
+    "map_id": "",
+    "steps": [
+      {
+        "action": "seek_cover",
+        "id": "cover",
+        "next": "peek",
+        "timeout": 30.0
+      },
+      {
+        "action": "peek",
+        "id": "peek",
+        "next": "fire",
+        "timeout": 10.0
+      },
+      {
+        "action": "cast_skill",
+        "id": "fire",
+        "next": "hide",
+        "skill_request": {
+          "aim": "auto"
+        },
+        "timeout": 10.0
+      },
+      {
+        "action": "move_to",
+        "goal": {
+          "anchor": "cover"
+        },
+        "id": "hide",
+        "next": "wait"
+      },
+      {
+        "action": "wait",
+        "id": "wait",
+        "next": "peek",
+        "timeout": 10.0,
+        "when": {
+          "fact": "skill_ready",
+          "op": "eq",
+          "value": true
+        }
+      },
+      {
+        "action": "retreat",
+        "id": "escape",
+        "next": "return",
+        "timeout": 30.0
+      }
+    ]
+  },
+  "unit_type": "diamond",
+  "version": 2
+}

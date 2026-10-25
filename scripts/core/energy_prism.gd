@@ -41,7 +41,7 @@ func update_capture(delta: float, blue_count: int, red_count: int) -> void:
 func _physics_process(delta: float) -> void:
  if not arena.is_combat_active():
   return
- phase_time += delta
+ if not arena.reduced_motion: phase_time += delta
  var counts: Array[int] = [0, 0]
  for unit: BaseGeoUnit in arena.local_units:
   if global_position.distance_squared_to(unit.global_position) <= radius * radius:
@@ -50,17 +50,7 @@ func _physics_process(delta: float) -> void:
  queue_redraw()
 
 func _draw() -> void:
- var color: Color = Color(0.32, 0.48, 0.62) if capture_owner < 0 else (ProceduralGeo.BLUE if capture_owner == 0 else ProceduralGeo.RED)
- draw_circle(Vector2.ZERO, radius, Color(color, 0.035))
- draw_arc(Vector2.ZERO, radius, 0, TAU, 64, Color(color, 0.4), 1.2, true)
- for index: int in range(8):
-  var angle: float = float(index) * TAU / 8.0
-  draw_arc(Vector2.ZERO, radius - 6.0, angle, angle + 0.10, 3, color, 3.0, true)
- var points: PackedVector2Array = ProceduralGeo.get_regular_polygon(24.0, 4)
- draw_colored_polygon(points, Color(color, 0.16))
- points.append(points[0])
- draw_polyline(points, Color(color.r * 1.5, color.g * 1.5, color.b * 1.5), 2.5, true)
- draw_circle(Vector2.ZERO, 5.0, color)
+ TerrainArt.energy(self,capture_owner)
  if capturing_team >= 0:
   var progress_color: Color = ProceduralGeo.BLUE if capturing_team == 0 else ProceduralGeo.RED
   draw_arc(Vector2.ZERO, radius + 5.0, -PI / 2.0, -PI / 2.0 + TAU * progress / 5.0, 64, progress_color, 4.0, true)

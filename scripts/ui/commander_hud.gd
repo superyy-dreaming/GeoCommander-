@@ -54,6 +54,11 @@ var status_layout: HBoxContainer
 var actions_layout: HFlowContainer
 var matrix_frame: PanelContainer
 var ui_theme: Theme
+var tool_tabs: TabContainer
+var tool_pages: Array[ScrollContainer] = []
+var tool_panels: Array[PanelContainer] = []
+var top_frame: PanelContainer
+var brand_label: Label
 
 func _ready() -> void:
  layer = 10
@@ -74,6 +79,7 @@ func _ready() -> void:
  _tactic_updated(0, TacticalBrain.team_profiles[0], "默认均衡战术")
  GameSettings.settings_changed.connect(settings_updated)
  settings_updated()
+ root.resized.connect(layout_tools)
  open_matrix()
  update_hud()
 
@@ -128,6 +134,8 @@ func bar(color: Color, height: float = 6.0) -> ProgressBar:
 
 func build_top() -> void:
  var top: PanelContainer = panel(root)
+ top_frame = top
+ top.resized.connect(layout_header)
  top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
  top.offset_left = 24
  top.offset_right = -24
@@ -139,12 +147,15 @@ func build_top() -> void:
  blue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  row.add_child(blue)
  blue_label = label("BLUE CORE   2500 / 2500",22,ProceduralGeo.BLUE)
+ blue_label.clip_text = true
  blue.add_child(blue_label)
  blue_health = bar(ProceduralGeo.BLUE)
  blue.add_child(blue_health)
  var blue_sub: HBoxContainer = HBoxContainer.new()
  blue.add_child(blue_sub)
  var title: Label = label("GEOCOMMANDER",18,TEXT)
+ brand_label = title
+ title.clip_text = true
  title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  blue_sub.add_child(title)
  blue_sub.add_child(label("蓝方指挥席",16,MUTED))
@@ -155,17 +166,20 @@ func build_top() -> void:
  time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
  center.add_child(time_label)
  prism_label = label("NORTH  中立    SOUTH  中立",16,MUTED)
+ prism_label.clip_text = true
  prism_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
  center.add_child(prism_label)
  var red: VBoxContainer = VBoxContainer.new()
  red.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  row.add_child(red)
  red_label = label("RED CORE   2500 / 2500",22,ProceduralGeo.RED)
+ red_label.clip_text = true
  red_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
  red.add_child(red_label)
  red_health = bar(ProceduralGeo.RED)
  red.add_child(red_health)
  flux_label = label("FLUX  180   +12/s",20,ACCENT)
+ flux_label.clip_text = true
  flux_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
  red.add_child(flux_label)
  var actions: HFlowContainer = HFlowContainer.new()
@@ -193,6 +207,7 @@ func build_bottom() -> void:
  bottom.offset_bottom = -24
  bottom.add_theme_constant_override("separation",16)
  var deployment: PanelContainer = panel(bottom)
+ tool_panels.append(deployment)
  var deploy_column: VBoxContainer = VBoxContainer.new()
  deployment.add_child(deploy_column)
  var deploy_header: HBoxContainer = HBoxContainer.new()
@@ -214,6 +229,7 @@ func build_bottom() -> void:
   cards.add_child(card)
   unit_buttons.append(card)
  var terminal: PanelContainer = panel(bottom)
+ tool_panels.append(terminal)
  terminal.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  var column: VBoxContainer = VBoxContainer.new()
  terminal.add_child(column)
@@ -254,6 +270,7 @@ func build_bottom() -> void:
  cooldown_bar.value = 30.0
  column.add_child(cooldown_bar)
  var skills_panel: PanelContainer = panel(bottom)
+ tool_panels.append(skills_panel)
  skills_panel.custom_minimum_size.x = 270
  var skill_column: VBoxContainer = VBoxContainer.new()
  skills_panel.add_child(skill_column)
@@ -274,6 +291,19 @@ func build_bottom() -> void:
   skill_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
   skill_bar.max_value = float(UnitCatalog.SKILLS[skill]["cd"])
   skill_bars[skill] = skill_bar
+ tool_tabs = TabContainer.new()
+ root.add_child(tool_tabs)
+ tool_tabs.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+ tool_tabs.offset_left = 24
+ tool_tabs.offset_right = -24
+ tool_tabs.offset_bottom = -24
+ for title: String in ["部署编队","战术终端","全局指挥"]:
+  var page: ScrollContainer = ScrollContainer.new()
+  page.name = title
+  page.mouse_force_pass_scroll_events = false
+  tool_tabs.add_child(page)
+  tool_pages.append(page)
+ tool_tabs.hide()
  var status: HBoxContainer = HBoxContainer.new()
  status_layout = status
  root.add_child(status)
@@ -282,7 +312,7 @@ func build_bottom() -> void:
  status.offset_right = -30
  status.offset_top = -274
  status.offset_bottom = -240
- message_label = label("数字 1-5 部署  |  WASD 移动  |  滚轮缩放  |  Z/X/C 指挥技能",17,MUTED)
+ message_label = label("B 蓝方  ·  R 红方  ·  ◆ 基地  ·  ◇ 能源棱镜  ·  ■ 掩体  ·  ◈ 晶簇  ·  六边形 熵减区  |  数字1-5部署  |  WASD移动",17,MUTED)
  message_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  message_label.clip_text = true
  status.add_child(message_label)
@@ -340,6 +370,7 @@ func build_matrix() -> void:
   roster.add_child(choice)
   selected_buttons[kind] = choice
   roster.add_child(label(String(descriptions[kind]),15,MUTED))
+ roster.add_child(button("恢复所选兵种默认",reset_selected_program))
  var editor: VBoxContainer = VBoxContainer.new()
  editor.custom_minimum_size.x = 420
  editor.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -414,6 +445,20 @@ func build_matrix() -> void:
  footer.add_child(matrix_apply)
  refresh_preview()
 
+func reset_selected_program() -> void:
+ if arena.phase != MainArena.Phase.PREPARING:
+  arena.notify("仅战前可单独恢复兵种，战中提交将替换整队战术",true)
+  return
+ var defaults: Dictionary = TacticalBrain.get_default_profile()["unit_rules"][selected_kind].duplicate(true)
+ TacticalBrain.opening_profile["unit_rules"][selected_kind] = defaults.duplicate(true)
+ TacticalBrain.team_profiles[0]["unit_rules"][selected_kind] = defaults.duplicate(true)
+ draft_profile = TacticalBrain.team_profiles[0].duplicate(true)
+ draft_overrides.erase(selected_kind)
+ matrix_compiled = true
+ arena.profile_changed.emit(0,TacticalBrain.team_profiles[0])
+ refresh_preview()
+ arena.notify("已恢复"+UnitCatalog.DATA[selected_kind]["zh"]+"默认，其他兵种保留")
+
 func select_unit(kind: String) -> void:
  selected_kind = kind
  for key: String in selected_buttons:
@@ -452,6 +497,9 @@ func apply_matrix() -> void:
  if bool(result["ok"]):
   if arena.phase == MainArena.Phase.PREPARING:
    arena.start_match()
+   if arena.phase == MainArena.Phase.PREPARING:
+    matrix_status.text = TacticPlan.profile_error(arena.profile_for(0),arena.map_id)
+    return
   close_matrix()
  else:
   matrix_status.text = String(result["message"])
@@ -590,12 +638,12 @@ func update_hud() -> void:
  time_label.text = "%02d:%02d" % [seconds / 60, seconds % 60]
  if arena.phase == MainArena.Phase.PREPARING:
   time_label.text = "准备阶段"
- blue_label.text = "BLUE CORE   %d / 2500" % roundi(arena.bases[0].current_hp)
- red_label.text = "RED CORE   %d / 2500" % roundi(arena.bases[1].current_hp)
+ blue_label.text = "蓝方核心 %d / 2500" % roundi(arena.bases[0].current_hp)
+ red_label.text = "红方核心 %d / 2500" % roundi(arena.bases[1].current_hp)
  blue_health.value = arena.bases[0].current_hp
  red_health.value = arena.bases[1].current_hp
  flux_label.text = "FLUX  %d   +%d/s" % [floori(arena.flux[0]),int(arena.income(0))]
- prism_label.text = "NORTH " + ownership(arena.prisms[0].capture_owner) + "    SOUTH " + ownership(arena.prisms[1].capture_owner)
+ prism_label.text = "北能源 " + ownership(arena.prisms[0].capture_owner) + ("\n" if float(GameSettings.values["font_scale"])>1.3 else "    ") + "南能源 " + ownership(arena.prisms[1].capture_owner)
  var population: Label = root.find_child("Population",true,false) as Label
  population.text = "UNITS  %d / 30" % arena.units_for(0).size()
  start_button.visible = arena.phase == MainArena.Phase.PREPARING
@@ -683,5 +731,31 @@ func settings_updated() -> void:
  status_layout.offset_top = bottom_layout.offset_top-42
  status_layout.offset_bottom = bottom_layout.offset_top-8
  for card: UnitDeployButton in unit_buttons: card.update_metrics()
+ update_hud()
+ layout_tools.call_deferred()
  if is_instance_valid(matrix_frame):
   matrix_frame.custom_minimum_size = Vector2(1500+200*(factor-1),800+100*(factor-1))
+
+func layout_tools() -> void:
+ if not is_instance_valid(tool_tabs): return
+ var needed: float = 32.0
+ for pane: PanelContainer in tool_panels: needed += pane.get_combined_minimum_size().x
+ var compact: bool = needed>root.size.x-48
+ for index: int in range(tool_panels.size()):
+  var target: Node = tool_pages[index] if compact else bottom_layout
+  if tool_panels[index].get_parent()!=target: tool_panels[index].reparent(target)
+  tool_panels[index].size_flags_horizontal = Control.SIZE_EXPAND_FILL if compact or index==1 else Control.SIZE_FILL
+ bottom_layout.visible = not compact
+ tool_tabs.visible = compact
+ var factor: float = float(GameSettings.values["font_scale"])
+ var height: float = minf(270+(factor-1)*80,root.size.y*0.48)
+ tool_tabs.offset_top = -height-24
+ var top: float = tool_tabs.offset_top if compact else bottom_layout.offset_top
+ status_layout.offset_top = top-42
+ status_layout.offset_bottom = top-8
+ layout_header()
+
+func layout_header() -> void:
+ if not is_instance_valid(actions_layout): return
+ brand_label.visible = root.size.x>=1600 or float(GameSettings.values["font_scale"])<=1.15
+ actions_layout.offset_top = top_frame.offset_top+top_frame.size.y+8

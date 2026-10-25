@@ -1,6 +1,7 @@
 class_name LaboratoryView
 extends Control
 
+signal path_edited(points: Array, obstacle: String)
 signal layout_edited
 signal changed
 signal message(text: String)
@@ -20,7 +21,15 @@ var dragging: bool = false
 var panning: bool = false
 var zoom_factor: float = 1.0
 var selected_unit: BaseGeoUnit
+var edit_mode: int = 0
+var path_edit_allowed: Callable
+var path_step: String = ""
+var path_points: Array = []
+var path_obstacle: String = ""
+var dragging_point: int = -1
+var overlay: TacticPathOverlay
 var seed_value: int = 7401
+var restore_error: String = ""
 
 func _ready() -> void:
  custom_minimum_size = Vector2(300,160)
@@ -39,6 +48,10 @@ func _ready() -> void:
  image.mouse_filter = Control.MOUSE_FILTER_IGNORE
  image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
  add_child(image)
+ overlay = TacticPathOverlay.new()
+ overlay.view = self
+ overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+ add_child(overlay)
  resized.connect(fit)
  gui_input.connect(input_event)
  fit()
@@ -47,7 +60,7 @@ func _ready() -> void:
 func fit() -> void:
  if not is_instance_valid(viewport): return
  viewport.size = Vector2i(maxf(size.x,1),maxf(size.y,1))
- if is_instance_valid(camera): camera.zoom = Vector2.ONE*maxf(0.01,minf(size.x/2400.0,size.y/1350.0))*zoom_factor
+ if is_instance_valid(camera): camera.zoom = Vector2.ONE*maxf(0.01,minf(size.x/MapCatalog.WORLD_SIZE.x,size.y/MapCatalog.WORLD_SIZE.y))*zoom_factor
 
 func rebuild(run: bool, compare: bool) -> void:
  if is_instance_valid(context):
@@ -57,11 +70,12 @@ func rebuild(run: bool, compare: bool) -> void:
  context = LaboratoryArena.new()
  context.map_id = map_id
  context.layout = layout.duplicate(true)
+ context.layout_error = restore_error
  context.seed_value = seed_value
  context.comparison = compare
  viewport.add_child(context)
  camera = Camera2D.new()
- camera.position = Vector2(1200,675)
+ camera.position = MapCatalog.CENTER
  context.add_child(camera)
  fit()
  selection = -1
@@ -74,6 +88,9 @@ func world_point(point: Vector2) -> Vector2:
  return camera.position+(point-size*0.5)/camera.zoom
 
 func persist() -> void:
+ if not restore_error.is_empty():
+  message.emit(restore_error+"。原布阵保留，请明确清空或载入预设后重新布阵。")
+  return
  LaboratoryStore.setup = {"map_id":map_id,"seed":seed_value,"units":layout.duplicate(true)}
  LaboratoryStore.save()
  layout_edited.emit()
@@ -114,8 +131,58 @@ func edit_selected(hp: float, angle: float) -> void:
  selection = index
  persist()
 
+func cancel_interaction() -> void:
+ dragging = false
+ panning = false
+ dragging_point = -1
+
 func input_event(event: InputEvent) -> void:
  if not is_instance_valid(context): return
+ if edit_mode>0:
+  if event is InputEventMouseButton and (event as InputEventMouseButton).button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT]:
+   var mouse: InputEventMouseButton = event as InputEventMouseButton
+   if path_edit_allowed.is_valid() and not path_edit_allowed.call():
+    message.emit("AI生成中，请先取消再编辑路径")
+    accept_event()
+    return
+   if context.state != LaboratoryArena.State.ARRANGING:
+    message.emit("先重置布阵，再编辑路径")
+    accept_event()
+    return
+   if path_step.is_empty():
+    message.emit("先在步骤页选择一个v2步骤")
+    return
+   var point: Vector2 = world_point(mouse.position)
+   if edit_mode==2 and mouse.pressed:
+    for wall: TerrainWall in context.navigation.walls:
+     if Geometry2D.is_point_in_polygon(point,wall.transform*wall.polygon):
+      path_edited.emit(path_points,str(wall.get_meta("obstacle_id","")))
+      accept_event()
+      return
+    message.emit("请点击墙体；晶簇和减速区不作为可靠掩体")
+   elif edit_mode==1:
+    var nearest: int = -1
+    for i: int in range(path_points.size()):
+     if point.distance_to(Vector2(path_points[i][0],path_points[i][1]))<18.0/camera.zoom.x: nearest=i
+    if mouse.button_index==MOUSE_BUTTON_RIGHT and mouse.pressed and nearest>=0:
+     var points: Array = path_points.duplicate(true)
+     points.remove_at(nearest)
+     path_edited.emit(points,"")
+    elif mouse.button_index==MOUSE_BUTTON_LEFT:
+     if mouse.pressed:
+      grab_focus()
+      dragging_point=nearest
+      if nearest<0:
+       var points: Array = path_points.duplicate(true)
+       points.append([snappedf(point.x,1),snappedf(point.y,1)])
+       path_edited.emit(points,"")
+     elif dragging_point>=0:
+      var points: Array = path_points.duplicate(true)
+      points[dragging_point]=[snappedf(point.x,1),snappedf(point.y,1)]
+      dragging_point=-1
+      path_edited.emit(points,"")
+   accept_event()
+   return
  if event is InputEventMouseButton:
   var mouse: InputEventMouseButton = event as InputEventMouseButton
   if mouse.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN] and mouse.pressed:
@@ -155,9 +222,12 @@ func input_event(event: InputEvent) -> void:
      else: message.emit("移动未应用："+error)
    accept_event()
  elif event is InputEventMouseMotion and panning:
-  camera.position = (camera.position-(event as InputEventMouseMotion).relative/camera.zoom).clamp(Vector2.ZERO,Vector2(2400,1350))
+  camera.position = (camera.position-(event as InputEventMouseMotion).relative/camera.zoom).clamp(Vector2.ZERO,MapCatalog.WORLD_SIZE)
  elif event is InputEventKey and event.is_pressed():
-  if (event as InputEventKey).keycode in [KEY_DELETE,KEY_BACKSPACE]: delete_selected()
+  if edit_mode==0 and (event as InputEventKey).keycode in [KEY_DELETE,KEY_BACKSPACE]: delete_selected()
 
 func _exit_tree() -> void:
  if is_instance_valid(context): context.shutdown()
+
+func _process(_delta: float) -> void:
+ if is_instance_valid(overlay): overlay.queue_redraw()

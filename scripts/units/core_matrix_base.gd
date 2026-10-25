@@ -33,22 +33,5 @@ func take_damage(amount: float, _attacker: Node2D = null) -> void:
   arena.call("finish_match", 1 - team, "核心矩阵被摧毁")
  queue_redraw()
 
-func _process(delta: float) -> void:
- phase_time += delta
- queue_redraw()
-
 func _draw() -> void:
- var color: Color = ProceduralGeo.BLUE if team == 0 else ProceduralGeo.RED
- var border: PackedVector2Array = ProceduralGeo.get_regular_polygon(66.0, 6, PI / 6.0)
- draw_circle(Vector2.ZERO, 104.0, Color(color, 0.035))
- draw_arc(Vector2.ZERO, 92.0, 0, TAU, 64, Color(color, 0.35), 1.5, true)
- for index: int in range(6):
-  var angle: float = TAU * float(index) / 6.0
-  draw_line(Vector2.RIGHT.rotated(angle) * 81.0, Vector2.RIGHT.rotated(angle) * 96.0, Color(color, 0.7), 3.0, true)
- draw_colored_polygon(border, Color(color, 0.10))
- var closed: PackedVector2Array = border.duplicate()
- closed.append(closed[0])
- draw_polyline(closed, Color(color.r * 1.8, color.g * 1.8, color.b * 1.8, 1.0), 3.0, true)
- var inner: PackedVector2Array = ProceduralGeo.get_regular_polygon(48.0 * sqrt(maxf(0.0, current_hp / max_hp)), 6, -phase_time * 0.12)
- draw_colored_polygon(inner, Color(color, 0.5))
- draw_circle(Vector2.ZERO, 10.0, color)
+ TerrainArt.base(self,team,current_hp/max_hp)

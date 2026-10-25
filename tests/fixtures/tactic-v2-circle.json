@@ -1,0 +1,74 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "midline_support",
+    "priority": "cluster",
+    "retreat_hp": 0.3,
+    "skill_cond": "cluster_3plus",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "plan": {
+    "entry": "cover",
+    "finish": "hold",
+    "interrupts": [
+      {
+        "goto": "escape",
+        "id": "critical",
+        "when": {
+          "fact": "self_hp",
+          "op": "lt",
+          "value": 0.3
+        }
+      }
+    ],
+    "map_id": "",
+    "steps": [
+      {
+        "action": "seek_cover",
+        "id": "cover",
+        "next": "ready",
+        "target": "nearest",
+        "timeout": 30.0
+      },
+      {
+        "action": "wait",
+        "id": "ready",
+        "next": "gravity",
+        "timeout": 15.0,
+        "when": {
+          "all": [
+            {
+              "fact": "skill_ready",
+              "op": "eq",
+              "value": true
+            },
+            {
+              "fact": "target_cluster",
+              "op": "gte",
+              "value": 2
+            }
+          ]
+        }
+      },
+      {
+        "action": "cast_skill",
+        "id": "gravity",
+        "next": "ready",
+        "skill_request": {
+          "aim": "auto"
+        },
+        "timeout": 10.0
+      },
+      {
+        "action": "retreat",
+        "id": "escape",
+        "next": "return",
+        "timeout": 30.0
+      }
+    ]
+  },
+  "unit_type": "circle",
+  "version": 2
+}

@@ -5,6 +5,7 @@ var team: int = 0
 var arena: CombatContext
 var age: float = 0.0
 var radius: float = 160.0
+var caster: WeakRef
 var affected: Array[BaseGeoUnit] = []
 
 func _ready() -> void:
@@ -38,6 +39,8 @@ func _physics_process(delta: float) -> void:
     unit.gravity_sources.erase(get_instance_id())
     unit.in_gravity = not unit.gravity_sources.is_empty()
   TransientVFX.effect(arena, global_position, Color(2.0, 0.4, 2.4), "pulse", 200.0, 0.4)
+  var unit: BaseGeoUnit = caster.get_ref() as BaseGeoUnit if is_instance_valid(caster) else null
+  if is_instance_valid(unit): unit.skill_finished()
   queue_free()
  queue_redraw()
 

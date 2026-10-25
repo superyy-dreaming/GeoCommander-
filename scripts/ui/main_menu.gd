@@ -17,7 +17,7 @@ var background: ShaderMaterial
 var settings: SettingsPanel
 
 func _ready() -> void:
- get_window().content_scale_size = Vector2i.ZERO
+ GameSettings.apply_content_scale()
  var world: Node2D = Node2D.new()
  add_child(world)
  background = CombatContext.create_environment(world,Rect2(0,0,3200,2150))
@@ -112,7 +112,7 @@ func build_home() -> void:
  home_preview = MapPreview.new()
  home_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
  right.add_child(home_preview)
- var note: Label = text_label("三张战场，三种推进思路。选择地图后，在战前矩阵中配置你的开局。",18,CommanderTheme.MUTED)
+ var note: Label = text_label("六张战场，六种推进思路。选择地图后，在战前矩阵中配置你的开局。",18,CommanderTheme.MUTED)
  note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
  right.add_child(note)
 
@@ -123,10 +123,14 @@ func build_single() -> void:
  body.add_theme_constant_override("separation",24)
  body.size_flags_vertical = Control.SIZE_EXPAND_FILL
  column.add_child(body)
+ var list_scroll: ScrollContainer=ScrollContainer.new()
+ list_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED
+ list_scroll.custom_minimum_size.x=300
+ body.add_child(list_scroll)
  var list: VBoxContainer = VBoxContainer.new()
- list.custom_minimum_size.x = 300
+ list.size_flags_horizontal=Control.SIZE_EXPAND_FILL
  list.add_theme_constant_override("separation",16)
- body.add_child(list)
+ list_scroll.add_child(list)
  for id: String in MapCatalog.IDS:
   var data: Dictionary = MapCatalog.definition(id)
   var choice: Button = button(data["title"],func() -> void: select_map(id))
@@ -145,13 +149,20 @@ func build_single() -> void:
  right.add_child(map_title)
  map_description = text_label("",18,CommanderTheme.MUTED)
  map_description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
- right.add_child(map_description)
  map_preview = MapPreview.new()
  map_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
  right.add_child(map_preview)
- var legend: Label = text_label("灰色：掩体   青白菱形：折射晶簇   琥珀六边形：减速区\n金色圆环：能源点   蓝 / 红六边形：双方基地",16,CommanderTheme.MUTED)
- legend.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
- right.add_child(legend)
+ var detail_scroll: ScrollContainer=ScrollContainer.new()
+ detail_scroll.horizontal_scroll_mode=ScrollContainer.SCROLL_MODE_DISABLED
+ detail_scroll.size_flags_vertical=Control.SIZE_EXPAND_FILL
+ detail_scroll.size_flags_stretch_ratio=0.45
+ right.add_child(detail_scroll)
+ var details: VBoxContainer=VBoxContainer.new()
+ details.size_flags_horizontal=Control.SIZE_EXPAND_FILL
+ details.add_theme_constant_override("separation",16)
+ detail_scroll.add_child(details)
+ details.add_child(map_description)
+ details.add_child(MapLegend.new())
  var footer: HBoxContainer = HBoxContainer.new()
  column.add_child(footer)
  footer.add_child(button("返回首页",func() -> void: show_page("home")))
@@ -237,6 +248,3 @@ func _unhandled_key_input(event: InputEvent) -> void:
  if event is InputEventKey and event.is_pressed() and event.keycode == KEY_ESCAPE and page != "home":
   show_page("home")
   get_viewport().set_input_as_handled()
-
-func _exit_tree() -> void:
- get_window().content_scale_size = Vector2i(1920,1080)

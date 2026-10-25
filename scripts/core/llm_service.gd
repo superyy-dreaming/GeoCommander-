@@ -83,16 +83,28 @@ func provider_profile() -> String:
  if base_url == "https://api.siliconflow.cn/v1" and model == "deepseek-ai/DeepSeek-V4.1-Flash": return "siliconflow_json"
  return "compatible"
 
-func request_payload(purpose: String, prompt: String = "", kind: String = "triangle") -> Dictionary:
+func request_payload(purpose: String, prompt: String = "", kind: String = "triangle", map_id: String = "", global_prompt: String = "") -> Dictionary:
  var messages: Array = [{"role":"user","content":"Reply with OK."}]
- if purpose == "generate": messages = [{"role":"system","content":UnitTacticProgram.system_prompt(kind)},{"role":"user","content":prompt}]
+ if purpose == "generate":
+  var normalized: Dictionary = TacticPlan.normalize_prompt(prompt)
+  var system_parts: Array[String] = []
+  if not global_prompt.strip_edges().is_empty(): system_parts.append("共享约束（整体提示词）：\n"+global_prompt.strip_edges())
+  system_parts.append(UnitTacticProgram.system_prompt(kind))
+  # Keep the prompt composition deterministic: shared constraints, ability
+  # contract, this unit's request, then the selected map context.  Putting
+  # the unit request in the same system contract prevents a provider from
+  # treating the map summary as a competing user instruction.
+  system_parts.append("当前兵种专属提示词：\n"+prompt.strip_edges())
+  system_parts.append("本地识别摘要（仅作解释和约束，不能替代 JSON 校验）：\n"+str(normalized["summary"])+("\n无法可靠支持："+", ".join(normalized["unsupported"]) if not normalized["unsupported"].is_empty() else ""))
+  if map_id in MapCatalog.IDS: system_parts.append(MapCatalog.prompt_summary(map_id))
+  messages = [{"role":"system","content":"\n\n".join(system_parts)},{"role":"user","content":"请根据系统中的专属提示词和能力约束输出严格 JSON。"}]
  var payload: Dictionary = {"model":model,"messages":messages,"stream":false}
  if provider_profile() == "siliconflow_json":
   payload["enable_thinking"] = false
   if purpose == "generate": payload["response_format"] = {"type":"json_object"}
  return payload
 
-func start(request_owner: int, purpose: String, prompt: String = "", kind: String = "triangle") -> Dictionary:
+func start(request_owner: int, purpose: String, prompt: String = "", kind: String = "triangle", map_id: String = "", global_prompt: String = "") -> Dictionary:
  cancel_owner(request_owner)
  if purpose not in ["models","test","generate"]: return {"ok":false,"message":"未知请求类型"}
  if purpose != "models" and model.is_empty(): return {"ok":false,"message":"请选择或手填模型 ID"}
@@ -107,7 +119,7 @@ func start(request_owner: int, purpose: String, prompt: String = "", kind: Strin
  request.max_redirects = 0
  add_child(request)
  var stamp: int = generation
- requests[request_owner] = {"node":request,"generation":stamp,"purpose":purpose,"started_ms":Time.get_ticks_msec(),"profile":provider_profile()}
+ requests[request_owner] = {"node":request,"generation":stamp,"purpose":purpose,"prompt":prompt,"started_ms":Time.get_ticks_msec(),"profile":provider_profile()}
  request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
   finish(request_owner,request,stamp,purpose,kind,result,response_code,body))
  var headers: PackedStringArray = ["Content-Type: application/json"]
@@ -115,7 +127,7 @@ func start(request_owner: int, purpose: String, prompt: String = "", kind: Strin
  var path: String = "/models" if purpose == "models" else "/chat/completions"
  var payload: String = ""
  if purpose != "models":
-  payload = JSON.stringify(request_payload(purpose,prompt,kind))
+  payload = JSON.stringify(request_payload(purpose,prompt,kind,map_id,global_prompt))
  var error: Error = request.request(base_url+path,headers,HTTPClient.METHOD_GET if purpose == "models" else HTTPClient.METHOD_POST,payload)
  if error != OK:
   cancel_owner(request_owner)
@@ -126,9 +138,11 @@ func finish(request_owner: int, request: HTTPRequest, stamp: int, purpose: Strin
  if not requests.has(request_owner) or requests[request_owner]["node"] != request or stamp != generation: return
  var elapsed_ms: int = Time.get_ticks_msec()-int(requests[request_owner]["started_ms"])
  var profile: String = requests[request_owner]["profile"]
+ var original_prompt: String = str(requests[request_owner].get("prompt",""))
  requests.erase(request_owner)
  request.queue_free()
  var response: Dictionary = decode(purpose,kind,result,code,body)
+ if purpose == "generate": response["intent_summary"] = TacticPlan.normalize_prompt(original_prompt)
  response["elapsed_ms"] = elapsed_ms
  response["request_profile"] = profile
  if purpose == "test": status = response["message"]

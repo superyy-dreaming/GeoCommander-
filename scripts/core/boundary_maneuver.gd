@@ -52,7 +52,7 @@ func goal_for(unit: BaseGeoUnit) -> Vector2:
  # When approaching the front, first step around the flank rather than cut
  # through the victim. Terrain navigation handles the resulting safe goal.
  if target is BaseGeoUnit and offset.dot(-facing) < 45.0 and absf(offset.dot(facing.orthogonal())) < 155.0:
-  return (target.global_position+facing.orthogonal()*side*230.0).clamp(Vector2(65,65),Vector2(2335,1285))
+  return (target.global_position+facing.orthogonal()*side*230.0).clamp(Vector2(65,65),MapCatalog.WORLD_SIZE-Vector2(65,65))
  return rear
 
 func rear_position(unit: BaseGeoUnit, target: Node2D, facing: Vector2) -> Vector2:
@@ -61,7 +61,7 @@ func rear_position(unit: BaseGeoUnit, target: Node2D, facing: Vector2) -> Vector
  for distance: float in [190.0,250.0,140.0]:
   for angle: float in [0.0,side*30.0,-side*30.0,side*55.0,-side*55.0]:
    var point: Vector2 = target.global_position-facing.rotated(deg_to_rad(angle))*distance
-   if not Rect2(45,45,2310,1260).has_point(point): continue
+   if not MapCatalog.WORLD_RECT.grow(-45.0).has_point(point): continue
    if not is_instance_valid(unit.arena.navigation) or unit.arena.navigation.segment_clear(point,point): return point
  return unit.global_position
 

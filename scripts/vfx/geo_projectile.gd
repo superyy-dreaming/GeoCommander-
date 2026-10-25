@@ -18,7 +18,6 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
  if not arena.is_combat_active():
-  queue_free()
   return
  var distance: float = minf(speed * delta, distance_left)
  var endpoint: Vector2 = global_position + direction * distance

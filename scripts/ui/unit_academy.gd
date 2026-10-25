@@ -34,7 +34,7 @@ var settings: SettingsPanel
 
 func _ready() -> void:
  process_mode = Node.PROCESS_MODE_PAUSABLE
- get_window().content_scale_size = Vector2i.ZERO
+ GameSettings.apply_content_scale()
  var world: Node2D = Node2D.new()
  add_child(world)
  background = CombatContext.create_environment(world,Rect2(0,0,3200,2150))
@@ -317,7 +317,6 @@ func leave_academy() -> void:
 
 func _exit_tree() -> void:
  if is_instance_valid(stage): stage.shutdown()
- get_window().content_scale_size = Vector2i(1920,1080)
 
 func open_laboratory() -> void:
  if transitioning: return

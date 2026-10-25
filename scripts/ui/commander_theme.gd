@@ -37,6 +37,12 @@ static func create() -> Theme:
  ui_theme.set_color("font_color", "Button", TEXT)
  ui_theme.set_color("font_disabled_color", "Button", MUTED)
  ui_theme.set_stylebox("panel", "PanelContainer", box(Color(0.022,0.043,0.067,0.96), Color(0.13,0.29,0.38)))
+ ui_theme.set_stylebox("panel", "PopupPanel", box(Color(0.022,0.043,0.067),Color(0.2,0.5,0.62)))
+ ui_theme.set_stylebox("panel", "PopupMenu", box(Color(0.022,0.043,0.067),Color(0.2,0.5,0.62)))
+ ui_theme.set_color("font_color","PopupMenu",TEXT)
+ ui_theme.set_color("font_disabled_color","PopupMenu",MUTED)
+ ui_theme.set_stylebox("hover","PopupMenu",box(Color(0.055,0.16,0.21),ACCENT))
+ ui_theme.set_constant("v_separation","PopupMenu",16)
  ui_theme.set_stylebox("normal", "Button", box(Color(0.04,0.09,0.13), Color(0.15,0.33,0.43)))
  ui_theme.set_stylebox("hover", "Button", box(Color(0.055,0.16,0.21), ACCENT))
  ui_theme.set_stylebox("pressed", "Button", box(Color(0.06,0.22,0.28), ACCENT, 2))
@@ -46,6 +52,7 @@ static func create() -> Theme:
  for kind: String in ["LineEdit", "TextEdit"]:
   ui_theme.set_stylebox("normal", kind, box(Color(0.012,0.025,0.041), Color(0.16,0.34,0.44)))
   ui_theme.set_stylebox("focus", kind, focus)
+  ui_theme.set_stylebox("read_only",kind,box(Color(0.012,0.025,0.041),Color(0.16,0.34,0.44)))
   ui_theme.set_color("font_color", kind, TEXT)
   ui_theme.set_color("font_placeholder_color", kind, MUTED)
   ui_theme.set_color("caret_color", kind, ACCENT)
@@ -74,5 +81,17 @@ static func refresh_fonts(node: Node) -> void:
   var control: Control = node as Control
   if control.has_meta("base_font_size"):
    control.add_theme_font_size_override("font_size",GameSettings.font_px(int(control.get_meta("base_font_size"))))
+  # Recompute from an immutable baseline so 180% -> 100% restores metrics.
+  if not control.has_meta("base_minimum_height"):
+   control.set_meta("base_minimum_height",control.custom_minimum_size.y)
+  var baseline: float = float(control.get_meta("base_minimum_height"))
+  if control is BaseButton and baseline>=44.0 and baseline<=48.0:
+   # Inherited theme caches update after the settings signal. Use the requested
+   # scale directly rather than reading the previous frame's cached font size.
+   var font_size: int = GameSettings.font_px(int(control.get_meta("base_font_size",18)))
+   var font_height: float = control.get_theme_font("font").get_height(font_size)
+   control.custom_minimum_size.y = maxf(baseline,font_height+20)
+  elif control is TextEdit and baseline>0.0:
+   control.custom_minimum_size.y = baseline*float(GameSettings.values["font_scale"])
   control.queue_redraw()
  for child: Node in node.get_children(): refresh_fonts(child)

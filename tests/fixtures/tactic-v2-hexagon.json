@@ -1,0 +1,59 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "safe_backline",
+    "priority": "none",
+    "retreat_hp": 0.6,
+    "skill_cond": "always_pulse",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "plan": {
+    "entry": "wait",
+    "finish": "hold",
+    "interrupts": [
+      {
+        "goto": "escape",
+        "id": "critical",
+        "when": {
+          "fact": "self_hp",
+          "op": "lt",
+          "value": 0.3
+        }
+      }
+    ],
+    "map_id": "",
+    "steps": [
+      {
+        "action": "wait",
+        "id": "wait",
+        "next": "heal",
+        "timeout": 120.0,
+        "when": {
+          "fact": "ally_min_hp",
+          "op": "lt",
+          "value": 0.7
+        }
+      },
+      {
+        "action": "cast_skill",
+        "id": "heal",
+        "next": "wait",
+        "skill_request": {
+          "aim": "self",
+          "purpose": "support"
+        },
+        "timeout": 5.0
+      },
+      {
+        "action": "retreat",
+        "id": "escape",
+        "next": "return",
+        "timeout": 30.0
+      }
+    ]
+  },
+  "unit_type": "hexagon",
+  "version": 2
+}

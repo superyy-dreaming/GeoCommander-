@@ -1,0 +1,63 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "frontline_screen",
+    "priority": "closest",
+    "retreat_hp": 0.0,
+    "skill_cond": "ally_threatened",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "plan": {
+    "entry": "guard",
+    "finish": "hold",
+    "interrupts": [
+      {
+        "goto": "escape",
+        "id": "critical",
+        "when": {
+          "fact": "self_hp",
+          "op": "lt",
+          "value": 0.3
+        }
+      }
+    ],
+    "map_id": "",
+    "steps": [
+      {
+        "action": "move_to",
+        "goal": {
+          "anchor": "home"
+        },
+        "id": "guard",
+        "next": "shield"
+      },
+      {
+        "action": "cast_skill",
+        "id": "shield",
+        "next": "wait",
+        "skill_request": {
+          "aim": "direction",
+          "direction": "forward",
+          "purpose": "support"
+        }
+      },
+      {
+        "action": "wait",
+        "attack": true,
+        "id": "wait",
+        "next": "shield",
+        "seconds": 2.0
+      },
+      {
+        "action": "retreat",
+        "id": "escape",
+        "next": "return",
+        "timeout": 30.0
+      }
+    ]
+  },
+  "unit_type": "square",
+  "version": 2
+}

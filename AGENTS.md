@@ -20,3 +20,5 @@
 - 真实HTTP请求验证使用正常时间，不带 `--fixed-fps` 或倍速；引擎定时器随模拟时间推进，会制造毫秒级假超时。网络生成与固定帧战斗回放分开，真实超时用墙钟耗时核实。
 - 全局字号复用稳定生命周期的 Theme/SystemFont，并原地更新；不要在设置事件中反复销毁重建字体。字号、显示回退与暂停须运行 `tests/launcher_native_flow.tscn -- --geo-test`，检查运行日志无字体缓存错误。
 - `SystemFont.font_names` 选择首个匹配字体，不能当成逐字回退链；macOS 的 PingFang 集合可能解析为 HK 字面。中文 UI 通过 `Font.fallbacks` 显式提供系统简体字形，修改字体后须验证“敌、远”等字与实际截图。
+- 修改精细战术执行、AI生成、实验存档或地图叠层时，读取 [docs/agent-tactic-runtime.md](docs/agent-tactic-runtime.md)，检查异步响应边界、JSON数字校验、绘制只读与真实行为回放。
+- 修改字号、分隔布局、菜单或悬浮控件时，读取 [docs/agent-ui-layout.md](docs/agent-ui-layout.md)，验证实际空间分配、字号往返、滚轮隔离及原生菜单键盘路径。

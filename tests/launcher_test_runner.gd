@@ -85,14 +85,18 @@ func run() -> void:
   add_child(arena)
   check(arena.navigation.walls.size() == data["walls"].size() and arena.navigation.crystals.size() == data["crystals"].size(),"地图实体数量与预览定义一致："+id)
   var symmetrical: bool = true
-  for crystal: Vector2 in data["crystals"]: symmetrical = symmetrical and (data["crystals"] as Array).has(Vector2(2400,1350)-crystal)
+  for crystal: Dictionary in data["crystals"]:
+   var mirrored_crystal: bool = false
+   for other_crystal: Dictionary in data["crystals"]:
+    mirrored_crystal = mirrored_crystal or other_crystal["position"].distance_to(MapCatalog.mirror(crystal["position"])) < 0.1
+   symmetrical = symmetrical and mirrored_crystal
   var vertices: Array[Vector2] = []
   for spec: Dictionary in data["walls"]:
    for vertex: Vector2 in Transform2D(spec["angle"],spec["position"])*(spec["polygon"] as PackedVector2Array): vertices.append(vertex)
   for vertex: Vector2 in vertices:
    var mirrored: bool = false
    for other: Vector2 in vertices:
-    if other.distance_to(Vector2(2400,1350)-vertex) < 0.1: mirrored = true
+    if other.distance_to(MapCatalog.mirror(vertex)) < 0.1: mirrored = true
    symmetrical = symmetrical and mirrored
   check(symmetrical,"地图地形180度对称："+id)
   var safe: bool = true

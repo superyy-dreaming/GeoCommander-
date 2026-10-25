@@ -71,14 +71,14 @@ func _ready() -> void:
  note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
  note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  footer.add_child(note)
- display_dialog = ConfirmationDialog.new()
+ display_dialog = BoundedConfirmation.new()
  display_dialog.title = "保留显示设置？"
  display_dialog.ok_button_text = "保留设置"
  display_dialog.cancel_button_text = "恢复原设置"
  display_dialog.confirmed.connect(confirm_display)
  display_dialog.canceled.connect(revert_display)
  root.add_child(display_dialog)
- reset_dialog = ConfirmationDialog.new()
+ reset_dialog = BoundedConfirmation.new()
  reset_dialog.title = "恢复默认设置？"
  reset_dialog.dialog_text = "将恢复所有界面、显示和镜头设置。\n当前战局、默认开局指令、实验与 LLM 连接配置会保留。"
  reset_dialog.ok_button_text = "恢复默认"
@@ -151,7 +151,7 @@ func select_category(title: String) -> void:
   mode.selected = int(GameSettings.values["window_mode"])
   mode.item_selected.connect(func(index: int) -> void: preview_display(index,GameSettings.values["resolution"]))
   mode.custom_minimum_size.y = 44
-  row("窗口模式","全屏使用当前显示器尺寸。").add_child(mode)
+  row("窗口模式","全屏使用当前显示器尺寸，并保持进入前窗口画面的比例与排版。").add_child(mode)
   controls["window_mode"] = mode
   var resolution: OptionButton = OptionButton.new()
   for dimensions: Vector2i in GameSettings.RESOLUTIONS:
@@ -163,15 +163,16 @@ func select_category(title: String) -> void:
   resolution.disabled = int(GameSettings.values["window_mode"]) == 1
   resolution.custom_minimum_size.y = 44
   resolution.item_selected.connect(func(index: int) -> void: preview_display(0,GameSettings.RESOLUTIONS[index]))
-  row("窗口分辨率","全屏时由显示器决定；超出可用空间的窗口尺寸不可选。").add_child(resolution)
+  row("窗口分辨率","决定窗口打开与恢复时的尺寸。进入全屏后以当时的实际窗口画面等比放大，宽高比不同时居中留边。").add_child(resolution)
   controls["resolution"] = resolution
   add_slider("glow","发光强度","仅调整几何与战斗特效，正文不受影响。0% 关闭发光。",0,1.5)
  elif title == "界面":
   var fonts: OptionButton = OptionButton.new()
-  for text: String in ["标准 · 100%","较大 · 115%","大 · 130%"]: fonts.add_item(text)
-  fonts.selected = [1.0,1.15,1.3].find(float(GameSettings.values["font_scale"]))
+  for text: String in ["标准 · 100%","较大 · 115%","大 · 130%","特大 · 150%","超大 · 180%"]: fonts.add_item(text)
+  var font_values: Array[float] = [1.0,1.15,1.3,1.5,1.8]
+  fonts.selected = font_values.find(float(GameSettings.values["font_scale"]))
   fonts.custom_minimum_size.y = 44
-  fonts.item_selected.connect(func(index: int) -> void: GameSettings.set_value("font_scale",[1.0,1.15,1.3][index]))
+  fonts.item_selected.connect(func(index: int) -> void: GameSettings.set_value("font_scale",font_values[index]))
   row("全局字号","应用于菜单、档案、演武读数、战场 HUD、战术矩阵及提示。").add_child(fonts)
   controls["font_scale"] = fonts
   var motion: CheckButton = CheckButton.new()
@@ -211,6 +212,10 @@ func add_slider(key: String, title: String, detail: String, minimum: float, maxi
 
 func settings_updated() -> void:
  CommanderTheme.refresh(root)
+ if controls.has("window_mode"):
+  (controls["window_mode"] as OptionButton).select(int(GameSettings.values["window_mode"]))
+ if controls.has("resolution"):
+  (controls["resolution"] as OptionButton).disabled = int(GameSettings.values["window_mode"]) == 1
  update_status()
 
 func update_status() -> void:
@@ -228,7 +233,10 @@ func preview_display(mode: int, dimensions: Vector2i) -> void:
  GameSettings.values["window_mode"] = mode
  GameSettings.values["resolution"] = dimensions
  GameSettings.apply_display()
- display_dialog.popup_centered(Vector2i(650,240))
+ # Headless behavior tests exercise the confirmation state machine without a
+ # native window. Opening a Window there produces invalid popup coordinates.
+ if DisplayServer.get_name() != "headless":
+  display_dialog.popup_centered(Vector2i(650,240))
 
 func confirm_display() -> void:
  if not display_pending: return

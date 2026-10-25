@@ -2,7 +2,7 @@ class_name EntropyField
 extends Area2D
 
 var arena: CombatContext
-var radius: float = 130.0
+var radius: float = 110.0
 var age: float = 0.0
 var affected: Array[BaseGeoUnit] = []
 
@@ -39,15 +39,4 @@ func _process(delta: float) -> void:
  queue_redraw()
 
 func _draw() -> void:
- var polygon: PackedVector2Array = ProceduralGeo.get_regular_polygon(radius,6)
- draw_colored_polygon(polygon,Color(0.8,0.35,0.04,0.045))
- for side: int in range(6):
-  var start: Vector2 = polygon[side]
-  var finish: Vector2 = polygon[(side+1)%6]
-  for dash: int in range(6):
-   var t: float = fmod(float(dash)/6.0 + age * 0.04,1.0)
-   draw_line(start.lerp(finish,t),start.lerp(finish,minf(t+0.08,1.0)),Color(1.8,0.9,0.1,0.65),2.0,true)
- if not arena.reduced_motion:
-  for index: int in range(8):
-   var point: Vector2 = Vector2(float(index % 4)*48.0-72.0, fmod(float(index)*47.0-age*16.0,140.0)-70.0)
-   draw_line(point,point+Vector2(0,-5),Color(1.3,0.65,0.1,0.3),1.0,true)
+ TerrainArt.entropy(self,radius)

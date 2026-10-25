@@ -89,18 +89,18 @@ func run() -> void:
  for map_id: String in MapCatalog.IDS:
   var arena: LaboratoryArena = LaboratoryArena.new()
   arena.map_id = map_id
-  arena.layout = [LaboratoryPresets.unit("triangle",0,1000,400,0.2),LaboratoryPresets.unit("square",1,1400,400)]
+  arena.layout = [LaboratoryPresets.unit("triangle",0,1000,130,0.2),LaboratoryPresets.unit("square",1,1400,130)]
   add_child(arena)
   await get_tree().physics_frame
   var blue: BaseGeoUnit = arena.units_for(0)[0]
   blue.decide_tactic()
   check(blue.matched_rule == formal_unit.matched_rule and blue.rule == formal_unit.rule,"same rule formal/sandbox "+map_id)
   check(arena.profile_for(1) == TacticalBrain.get_default_profile(),"red defaults "+map_id)
-  check(not arena.valid_point("triangle",Vector2(1200,140)).is_empty(),"crystal placement "+map_id)
-  check(not arena.valid_point("triangle",Vector2(220,675)).is_empty(),"base placement "+map_id)
+  check(not arena.valid_point("triangle",MapCatalog.definition(map_id)["crystals"][0]["position"]).is_empty(),"crystal placement "+map_id)
+  check(not arena.valid_point("triangle",MapCatalog.base_positions()[0]).is_empty(),"base placement "+map_id)
   var flux: float = formal.flux[0]
   arena.start()
-  blue.take_damage(9999)
+  blue.take_damage(9999,arena.units_for(1)[0])
   check(is_equal_approx(float(arena.totals[1]["damage"]),26.0),"actual overkill accounting "+map_id)
   await get_tree().physics_frame
   await get_tree().physics_frame
@@ -111,7 +111,7 @@ func run() -> void:
  formal.queue_free()
  await get_tree().process_frame
  var duel: LaboratoryArena = LaboratoryArena.new()
- duel.layout = [LaboratoryPresets.unit("square",0,1000,400),LaboratoryPresets.unit("square",1,1400,400)]
+ duel.layout = [LaboratoryPresets.unit("square",0,1000,130),LaboratoryPresets.unit("square",1,1400,130)]
  add_child(duel)
  await get_tree().physics_frame
  duel.start()

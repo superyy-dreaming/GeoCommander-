@@ -10,7 +10,13 @@ const KEYWORDS: Dictionary = {
  "kite": ["拉扯", "风筝", "后撤", "kite", "retreat"],
  "mid": ["中路推进", "走中路", "mid lane"],
  "split": ["分推", "南北包抄", "split push"],
- "crystal": ["利用地形折射", "晶簇折射", "crystal bounce"]
+ "crystal": ["利用地形折射", "晶簇折射", "crystal bounce"],
+ "rails":["加速轨","加速带","高速包抄"],
+ "portals":["虫洞","折跃","奇袭后排"],
+ "nebula":["星云","隐匿","埋伏"],
+ "splitter":["分光","中央棱镜","三向激光"],
+ "hazards":["躲避过载","撤出红圈"],
+ "flux":["抢晶簇","拾取晶体"]
 }
 var team_profiles: Array[Dictionary] = []
 var opening_prompt: String = "默认均衡战术"
@@ -63,6 +69,12 @@ func parse_prompt(prompt_text: String) -> Dictionary:
  var rules: Dictionary = profile["unit_rules"]
  for event: Dictionary in events:
   match String(event["action"]):
+   "rails","portals","nebula","hazards","flux":
+    var policy: String={"rails":"rails","portals":"portals","nebula":"nebula","hazards":"avoid_hazards","flux":"collect_flux"}[event["action"]]
+    for kind: String in rules: rules[kind]["terrain_strategy"]=policy
+   "splitter":
+    rules["diamond"]["terrain_strategy"]="splitter"
+    rules["diamond"]["movement"]="align_with_splitter"
    "mid": profile["lane_mode"] = "mid"
    "split": profile["lane_mode"] = "split"
    "crystal":

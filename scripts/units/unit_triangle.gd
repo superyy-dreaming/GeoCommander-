@@ -37,6 +37,7 @@ func tick_unit(delta: float) -> void:
   dash_previous = global_position
   dash_time -= delta
   if dash_time <= 0.0:
+   skill_finished()
    cancel_active_skill()
   return
  if not scripted_control:
@@ -46,6 +47,32 @@ func tick_unit(delta: float) -> void:
 func try_cast_skill() -> bool:
  if skill_left > 0.0 or dash_state != 0 or dead or stun_left > 0 or not arena.is_combat_active():
   return false
+ if not requested_skill.is_empty():
+  var direction: Vector2 = global_position.direction_to(SkillRequest.point(self,requested_skill))
+  var purpose: String = str(requested_skill.get("purpose","attack"))
+  if purpose != "travel":
+   if not target_valid(): return false
+   var distance: float = global_position.distance_to(current_target.global_position)
+   if distance<110 or distance>BoundaryManeuver.attack_reach(self,current_target):
+    skill_rejection = "冲刺目标不在真实可达射程"
+    return false
+   if purpose == "backstab" and not BoundaryManeuver.rear_angle(self,current_target):
+    skill_rejection = "尚未进入目标背后"
+    return false
+   if purpose == "backstab":
+    var endpoint: Vector2=global_position+direction*(980.0*0.28*terrain_multiplier(direction)*(1.6 if overclock_left>0 else 1.0))
+    var closest: Vector2=Geometry2D.get_closest_point_to_segment(current_target.global_position,global_position,endpoint)
+    if closest.distance_to(current_target.global_position)>unit_radius+float(current_target.get("unit_radius")):
+     skill_rejection="背刺方向未经过目标，请瞄准目标或修正方向"
+     return false
+  else:
+   var endpoint: Vector2 = global_position+direction*(980.0*0.28*(1.6 if overclock_left>0 else 1.0)+unit_radius+8)
+   var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position,endpoint,4|16,arena.friendly_shield_rids(team))
+   if not MapCatalog.WORLD_RECT.grow(-35).has_point(endpoint) or (is_instance_valid(arena.navigation) and not arena.navigation.segment_clear(global_position,endpoint)) or not get_world_2d().direct_space_state.intersect_ray(query).is_empty():
+    skill_rejection = "赶路冲刺前方不满足安全净空"
+    return false
+  begin_dash(direction,purpose)
+  return true
  if String(rule.get("skill_cond")) == "travel_and_backstab": return try_maneuver_dash()
  if not target_valid(): return false
  var target_pos: Vector2 = gravity_target if gravity_hint_left > 0.0 else current_target.global_position
@@ -94,7 +121,7 @@ func try_maneuver_dash() -> bool:
  var direction: Vector2 = arena.routed_direction(self,goal,boundary_maneuver.intent())
  if direction.is_zero_approx(): return false
  var endpoint: Vector2 = global_position+direction*(travel_length+unit_radius+8.0)
- if not Rect2(35,35,2330,1280).has_point(endpoint): return false
+ if not MapCatalog.WORLD_RECT.grow(-35).has_point(endpoint): return false
  if is_instance_valid(arena.navigation) and not arena.navigation.segment_clear(global_position,endpoint): return false
  var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(global_position,endpoint,4|16,arena.friendly_shield_rids(team))
  if not get_world_2d().direct_space_state.intersect_ray(query).is_empty(): return false
@@ -102,7 +129,7 @@ func try_maneuver_dash() -> bool:
  return true
 
 func hit_dash_segment(start: Vector2, end: Vector2) -> void:
- for enemy: BaseGeoUnit in enemies():
+ for enemy: BaseGeoUnit in actual_enemies():
   if dash_victims.has(enemy.get_instance_id()):
    continue
   var closest: Vector2 = Geometry2D.get_closest_point_to_segment(enemy.global_position, start, end)
@@ -117,7 +144,7 @@ func movement_velocity(delta: float) -> Vector2:
  if dash_state == 1:
   return Vector2.ZERO
  if dash_state == 2:
-  return dash_dir * 980.0 * terrain_multiplier() * (1.6 if overclock_left > 0.0 else 1.0)
+  return dash_dir * 980.0 * terrain_multiplier(dash_dir) * (1.6 if overclock_left > 0.0 else 1.0)
  return super.movement_velocity(delta)
 
 func cancel_active_skill() -> void:

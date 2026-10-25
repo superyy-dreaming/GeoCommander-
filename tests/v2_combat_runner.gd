@@ -63,7 +63,7 @@ func _ready() -> void:
  await frames(3)
  target.heal(1000.0)
  laser.call("fire_beam",Vector2.RIGHT)
- check(is_equal_approx(target.current_hp,target.max_hp-85.0*1.25),"光束折返穿过同目标只扣一次生命")
+ check(is_equal_approx(target.current_hp,target.max_hp-85.0*1.25*1.35),"光束折返穿过同目标只扣一次生命")
  var walls: CombatContext = fixture()
  var wall: TerrainWall = TerrainWall.new()
  wall.position = Vector2(300,350)

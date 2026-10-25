@@ -24,17 +24,20 @@ GEO_GODOT='/path/to/Godot' ./run.command
 
 渲染采用 Forward+、4x 2D MSAA 和 HDR。Apple Silicon 使用 Metal。最低窗口 1280×720，推荐 1440×900 或更高。首轮着色器编译可能比后续启动慢。
 
-## 开始界面与三张地图
+## 开始界面与六张地图
 
 启动后进入首页，可选择“单人游戏”“多人游戏”“设置”，或通过独立入口进入“兵种演练”。多人页面仅展示开发中的创建与加入菜单，多人菜单不会发起网络请求。
 
-单人页提供三张全部解锁的地图，左侧选择，右侧预览实际地形，再点击“进入战前准备”。三图具有相同兵种、经济与胜负规则：
+单人页提供六张全部解锁的地图，左侧选择，右侧预览实际地形，再点击“进入战前准备”。六图具有相同兵种、经济与胜负规则，统一使用2400×1350世界空间（地图空间版本3）：
 
 | 地图 | 特点 |
 |---|---|
-| 均衡前线 | 原有基地掩体、中心斜柱、四处晶簇与两处熵减区 |
-| 双翼迂回 | 两面中心长墙，上下路线适合包抄 |
-| 折光阵列 | 开放中场与六处晶簇，突出折射协同 |
+| 均衡前线 | 标准三路防线，动态闸门与隐匿星云 |
+| 双翼迂回 | 南北单向加速轨与侧翼星云，适合高速包抄 |
+| 折光阵列 | 中央三向分光棱镜与六处晶簇 |
+| 盘旋堡垒 | S型斜向墙体与一对虫洞 |
+| 交叉火线 | X型走廊、两对虫洞、动态闸门和星云 |
+| 晶脉迷城 | 中央过载反应堆、Flux拾取物和隐匿星云 |
 
 选图在本次程序运行内保留，重新开局沿用当前地图；退出程序后默认均衡前线。准备矩阵仍可编辑后开战。战中返回首页需要确认，确认期间暂停，取消后继续。
 
@@ -48,14 +51,16 @@ GEO_GODOT='/path/to/Godot' ./run.command
 
 菜单支持鼠标、Tab / Shift+Tab 和 Enter / Space，滚动区域跟随焦点。
 
-提示词实验室提供五兵种独立草稿、AI JSON 校验、三图双方自由布阵与预设、同种子默认对照、实际统计和规则读数。“应用当前兵种为开局”只替换当前兵种，战前矩阵直接保留已编译规则。
+提示词实验室提供整体提示词和五兵种独立草稿、AI JSON 校验、六图双方自由布阵与预设、同种子默认对照、实际统计和规则读数。“应用当前兵种为开局”只替换当前兵种，战前矩阵直接保留已编译规则。
+
+精细编排 v2 支持方向和时长、航点、真实掩体与探出、绕后、定向技能、分支、循环和可恢复中断。“步骤”页可编辑并撤销，“编辑路径”模式可拖动航点；暂停后可逐帧或运行到下一步骤。见[操作、规则与迁移说明](docs/tactic-plan.md)及[验证记录](docs/tactic-plan-verification.md)。
 
 ## 本机设置
 
 首页和战场顶部都可打开设置，包含显示、界面、LLM、操作与关于四页。战中打开会暂停单位、经济、计时和冷却，关闭恢复打开前的暂停状态。字号调整保留战术草稿和输入内容。
 
-- 窗口或全屏；窗口尺寸1280×720、1440×810、1440×900、1920×1080。默认1440×810，不适合当前屏幕的尺寸不可选。显示变化需在15秒内确认，取消或超时恢复。
-- 字号100%、115%、130%，覆盖菜单、档案、演武读数、HUD、矩阵与确认窗，不改变世界和单位尺寸。
+- 窗口或全屏；窗口尺寸1280×720、1440×810、1440×900、1920×1080。默认1440×810，不适合当前屏幕的尺寸不可选。进入全屏时会捕获当前实际窗口布局，文字、按钮、面板与战场整体等比放大；手动调整过窗口尺寸也会保持眼前排版，显示器宽高比不同时居中留边。游戏内切换仍需在15秒内确认，取消或超时恢复；macOS原生全屏入口使用同一缩放规则。
+- 字号100%、115%、130%、150%、180%，覆盖菜单、档案、演武读数、HUD、矩阵与确认窗，不改变世界和单位尺寸。
 - 发光0%–150%，默认100%；0%关闭发光。低动效关闭扫描和拖尾、减少碎片并取消淡出。
 - 镜头速度50%–200%，默认100%。操作页提供快捷键、玩法与版本说明。
 - 普通设置即时生效并自动保存；保存失败明确提示并提供重试。“恢复默认”需要确认，不清除战局或开局指令。
@@ -107,15 +112,19 @@ refract bounce
 
 终端基础冷却 30 秒。无法识别的指令不改变当前配置、不消耗冷却。矩阵中的编辑和撤退阈值滑块仅修改草稿，提交后才应用；战中与终端共享冷却及链路限制，打开矩阵不暂停战斗。
 
-战中终端继续采用本地关键词解析，提交会替换整队战术。兵种演练中的“提示词 · 布阵验证”可通过自行配置的 OpenAI 兼容服务将自然语言编译为单兵种条件 JSON。完整操作、规则与 API 配置见 [AI 提示词实验室](docs/ai-laboratory.md)。Key 仅保留本次运行。
+战中终端继续采用本地关键词解析，提交会替换整队战术。兵种演练中的“提示词 · 布阵验证”可通过自行配置的 OpenAI 兼容服务将自然语言编译为单兵种行动编排 JSON，兼容已有 v1 条件规则。操作与规则见[精细战术编排](docs/tactic-plan.md)，API 配置见 [AI 提示词实验室](docs/ai-laboratory.md)。Key 仅保留本次运行。
 
 ## 战术地形
 
-三张地图均按中心180°对称生成，掩体和晶簇数量随地图变化；每张地图保留两片熵减区。掩体阻挡移动、冲刺、弹体和激光；晶簇阻挡双方单位和普通弹体，激光按真实晶面法线折射。护盾每次增伤 35%，晶簇每次增伤 25%，最多两次折射、总长最多 750px，同次施法对同目标仅结算一次。
+六图的预览、正式对局、实验室、导航及AI地图摘要共用`MapCatalog`。墙体使用倒角堡垒、V形墙、楔形胸墙和六棱立柱；墙、晶簇、关闭的闸门阻挡真实移动与攻击。V形墙按凹轮廓分解碰撞，不把凹口填平。预览为独立HDR物理世界，仅绘制地图，不推进战斗与机关。
 
-熵减区内主动移动及冲刺速度乘以 0.65，与超频相乘，重叠区域不进一步减速；拉拽与击退保持独立物理速度。琥珀色轮廓表示减速。AI 使用三路可见性路网和中心、左右 ±38° 三射线处理绕行。
+普通激光最多750px、两次反射，护盾每次增伤35%，晶簇每次增伤25%。命中中央分光棱镜后最多分裂一次：中束85%、两侧±26°各75%，每束650px并继承已用反射次数。同次施法对同一目标只结算最高命中伤害。
 
-“中路推进 / 走中路 / mid lane”偏向 Y=675；“分推 / 南北包抄 / split push”按部署序号分配南北路；“利用地形折射 / 晶簇折射 / crystal bounce”让菱形寻找可命中的晶簇发射位。
+加速轨同向主动移动×1.75、逆向×0.65；熵减区×0.65，和超频、虫洞移速增益相乘，不放大拉拽与击退。隐匿星云限制敌军锁定；同星云、145px近距或被扫描/EMP显形的单位仍可被感知，范围伤害和已发射攻击仍能命中。六边形扫描为独立技能，不影响治疗。
+
+虫洞每单位8秒冷却，每对5次、耗尽14秒恢复；动态闸门20秒关闭、15秒开放。反应堆每55秒结算一次，最后6秒预警，爆炸160伤害并产生三个各50 Flux拾取物。准备、暂停及结束阶段停止机关结算。
+
+AI使用共享路网、动态拓扑和0°/±38°三射线处理目的地移动。方向步骤保持指定方向，不擅自绕行。普通AI默认避开反应堆预警，精细方案需要明确授权。详见[地图、机关与地形提示词](docs/map-overhaul.md)和[本轮验证](docs/map-overhaul-verification.md)。
 
 ## 全局技能
 
@@ -132,6 +141,7 @@ refract bounce
 ```sh
 ./run.command --headless --import
 ./run.command --headless --scene res://tests/check_scripts.tscn
+./run.command --headless --scene res://tests/map_overhaul_runner.tscn
 ./run.command --headless --scene res://tests/test_runner.tscn
 ./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/v2_test_runner.tscn
 ./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/v2_combat_runner.tscn
@@ -143,14 +153,16 @@ refract bounce
 ./run.command --headless --fixed-fps 60 --scene res://tests/simulation_runner.tscn -- --map=flanks
 ./run.command --headless --fixed-fps 60 --scene res://tests/simulation_runner.tscn -- --map=refraction
 ./run.command --scene res://tests/launcher_native_flow.tscn -- --geo-test
+./run.command --scene res://tests/fullscreen_scale_native.tscn -- --geo-test
+./run.command --scene res://tests/fullscreen_titlebar_native.tscn -- --geo-test
 ./run.command --scene res://tests/performance_runner.tscn -- --geo-test --launcher
 ./run.command --scene res://tests/launcher_visual_runner.tscn -- --geo-test
 python3 tests/encode_captures.py launcher-visual-report.json
 ```
 
-最后一条仅用于 QA 截图，需要 NumPy 和 Pillow。它把 Godot 的真实 HDR 线性帧缓冲编码成 sRGB PNG，不增加、修改任何画面元素。游戏运行不依赖 Python 或第三方库。
+`fullscreen_scale_native`验证直接`Window.mode`入口；`fullscreen_titlebar_native`需要按终端提示实际点击系统绿色按钮，并从系统 Window 菜单退出全屏，验证两种不同的事件顺序。最后一条仅用于 QA 截图，需要 NumPy 和 Pillow。它把 Godot 的真实 HDR 线性帧缓冲编码成 sRGB PNG，不增加、修改任何画面元素。游戏运行不依赖 Python 或第三方库。
 
-`artifacts/` 保存测试日志、截图与报告，`.godot/` 保存引擎缓存，两者均不属于运行源码。仓库仅保留 `artifacts/` 中八份不含凭据的真实模型 JSON 回放样例，其余日志、截图、报告与源码快照为本机验收产物，不随 Git 分发；验证文档中的这些产物链接需在本机查看或运行对应测试重新生成。AI 实验室验证见 [本轮验证](docs/ai-laboratory-verification.md)。此前验证记录见 [首页、地图与设置验证](docs/launcher-verification.md)，旧版记录保留在 [V2 验证](docs/verification.md)。
+`artifacts/` 保存测试日志、截图与报告，`.godot/` 保存引擎缓存，两者均不属于运行源码。仓库仅保留 `artifacts/` 中八份不含凭据的真实模型 JSON 回放样例，其余日志、截图、报告与源码快照为本机验收产物，不随 Git 分发；验证文档中的这些产物链接需在本机查看或运行对应测试重新生成。AI 实验室操作见 [使用说明](docs/ai-laboratory.md)，最新两栏布局、40%反馈区、战场菜单与悬浮读数见 [布局验证](docs/laboratory-layout-verification.md)，窗口与全屏的等比呈现见 [全屏缩放验证](docs/fullscreen-scaling-verification.md)。AI实验室原有验证见 [行为验证](docs/ai-laboratory-verification.md)。此前验证记录见 [首页、地图与设置验证](docs/launcher-verification.md)，旧版记录保留在 [V2 验证](docs/verification.md)。
 
 克隆后可离线回放已验证的模型输出，无需 API Key：
 

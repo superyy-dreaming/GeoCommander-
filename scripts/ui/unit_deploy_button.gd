@@ -32,4 +32,7 @@ func _draw() -> void:
 func update_metrics() -> void:
  var extra: float = float(GameSettings.values["font_scale"])-1.0
  custom_minimum_size = Vector2(104+70*extra,138+80*extra)
+ var font: Font = get_theme_font("font")
+ for entry: Array in [[UnitCatalog.DATA[kind]["name"],15],[UnitCatalog.DATA[kind]["zh"],16],[str(UnitCatalog.DATA[kind]["cost"])+" F  /  "+str(hotkey),16]]:
+  custom_minimum_size.x = maxf(custom_minimum_size.x,font.get_string_size(str(entry[0]),HORIZONTAL_ALIGNMENT_LEFT,-1,GameSettings.font_px(int(entry[1]))).x+20)
  queue_redraw()

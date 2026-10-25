@@ -1,0 +1,95 @@
+{
+  "base": {
+    "behavior": "normal",
+    "lane_mode": "auto",
+    "movement": "flank_sides",
+    "priority": "ranged_or_commander",
+    "retreat_hp": 0.2,
+    "skill_cond": "backstab_or_grav",
+    "skill_usage": "auto",
+    "stance": "balanced"
+  },
+  "plan": {
+    "entry": "north",
+    "finish": "hold",
+    "interrupts": [
+      {
+        "goto": "escape",
+        "id": "critical",
+        "when": {
+          "fact": "self_hp",
+          "op": "lt",
+          "value": 0.3
+        }
+      }
+    ],
+    "map_id": "",
+    "steps": [
+      {
+        "action": "move_direction",
+        "direction": "up",
+        "id": "north",
+        "label": "向上2秒",
+        "next": "cover",
+        "seconds": 2.0,
+        "target": "diamond"
+      },
+      {
+        "action": "seek_cover",
+        "id": "cover",
+        "label": "避开菱形直射",
+        "next": "ready",
+        "target": "diamond",
+        "timeout": 30.0
+      },
+      {
+        "action": "wait",
+        "id": "ready",
+        "next": "rear",
+        "target": "diamond",
+        "timeout": 5.0,
+        "when": {
+          "fact": "skill_ready",
+          "op": "eq",
+          "value": true
+        }
+      },
+      {
+        "action": "flank_target",
+        "id": "rear",
+        "next": "strike",
+        "target": "diamond",
+        "timeout": 30.0
+      },
+      {
+        "action": "cast_skill",
+        "id": "strike",
+        "next": "return_cover",
+        "skill_request": {
+          "aim": "target",
+          "purpose": "backstab"
+        },
+        "target": "diamond",
+        "timeout": 5.0
+      },
+      {
+        "action": "move_to",
+        "goal": {
+          "anchor": "cover"
+        },
+        "id": "return_cover",
+        "next": "cover",
+        "target": "diamond",
+        "timeout": 30.0
+      },
+      {
+        "action": "retreat",
+        "id": "escape",
+        "next": "return",
+        "timeout": 30.0
+      }
+    ]
+  },
+  "unit_type": "triangle",
+  "version": 2
+}

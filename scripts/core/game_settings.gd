@@ -11,9 +11,21 @@ var status: String = ""
 var dirty: bool = false
 var test_mode: bool = false
 var environments: Array[WeakRef] = []
+var display_initialized: bool = false
+var observed_window_mode: int = Window.MODE_WINDOWED
+var requested_window_mode: int = -1
+var fullscreen_canvas_size: Vector2i = Vector2i.ZERO
+var last_windowed_layout_size: Vector2i = Vector2i.ZERO
+var windowed_size_candidate: Vector2i = Vector2i.ZERO
+var windowed_size_stable_frames: int = 0
+var native_fullscreen_pending: bool = false
 
 func _ready() -> void:
  process_mode = Node.PROCESS_MODE_ALWAYS
+ observed_window_mode = get_window().mode
+ last_windowed_layout_size = current_layout_size()
+ windowed_size_candidate = last_windowed_layout_size
+ get_window().size_changed.connect(window_geometry_changed)
  test_mode = DisplayServer.get_name() == "headless" or "--geo-test" in OS.get_cmdline_user_args()
  if test_mode:
   storage_path = "user://test-settings.cfg"
@@ -23,7 +35,7 @@ func _ready() -> void:
 
 func valid_value(key: String, value: Variant) -> bool:
  match key:
-  "font_scale": return (value is float or value is int) and float(value) in [1.0,1.15,1.3]
+  "font_scale": return (value is float or value is int) and float(value) in [1.0,1.15,1.3,1.5,1.8]
   "window_mode": return value is int and value in [0,1]
   "resolution": return value is Vector2i and value in RESOLUTIONS
   "glow": return (value is float or value is int) and is_finite(float(value)) and float(value) >= 0 and float(value) <= 1.5
@@ -83,12 +95,75 @@ func resolution_fits(dimensions: Vector2i) -> bool:
  var usable: Rect2i = DisplayServer.screen_get_usable_rect()
  return dimensions.x <= usable.size.x and dimensions.y <= usable.size.y-40
 
-func apply_display() -> void:
- if DisplayServer.get_name() == "headless": return
+func is_fullscreen_mode(mode: int) -> bool:
+ return mode == Window.MODE_FULLSCREEN or mode == Window.MODE_EXCLUSIVE_FULLSCREEN
+
+func current_layout_size() -> Vector2i:
+ var visible: Vector2 = get_viewport().get_visible_rect().size
+ return Vector2i(maxi(1,roundi(visible.x)),maxi(1,roundi(visible.y)))
+
+func remember_stable_window_size() -> void:
  var window: Window = get_window()
- if int(values["window_mode"]) == 1:
+ if native_fullscreen_pending or is_fullscreen_mode(window.mode) or window.content_scale_size != Vector2i.ZERO: return
+ var current: Vector2i = current_layout_size()
+ if current != windowed_size_candidate:
+  windowed_size_candidate = current
+  windowed_size_stable_frames = 0
+  return
+ windowed_size_stable_frames += 1
+ if windowed_size_stable_frames >= 3: last_windowed_layout_size = current
+
+func window_geometry_changed() -> void:
+ sync_native_fullscreen_transition(get_window().mode)
+
+func sync_native_fullscreen_transition(mode: int) -> void:
+ if OS.get_name() != "macOS" or not display_initialized: return
+ if is_fullscreen_mode(mode) or is_fullscreen_mode(observed_window_mode): return
+ var window: Window = get_window()
+ # AppKit sends the screen-sized resize before didEnterFullScreen updates
+ # Window.mode. A decorated window/maximize has a smaller content rectangle.
+ # Treat this geometry as provisional, never as a new windowed layout. No
+ # timer can decide ownership of this resize: mode confirmation commits it,
+ # while restored window geometry cancels it.
+ var screen_sized: bool = window.size == DisplayServer.screen_get_size(window.current_screen)
+ if screen_sized and not native_fullscreen_pending:
+  native_fullscreen_pending = true
+  fullscreen_canvas_size = last_windowed_layout_size
+  apply_content_scale()
+ elif not screen_sized and native_fullscreen_pending:
+  native_fullscreen_pending = false
+  apply_content_scale()
+
+func apply_content_scale() -> void:
+ var window: Window = get_window()
+ window.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+ window.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_KEEP
+ var fullscreen: bool = native_fullscreen_pending or int(values["window_mode"]) == 1 or is_fullscreen_mode(window.mode)
+ if fullscreen and fullscreen_canvas_size == Vector2i.ZERO:
+  fullscreen_canvas_size = Vector2i(values["resolution"])
+ # Fullscreen uses the actual pre-fullscreen layout as its logical canvas.
+ # This also covers the macOS native fullscreen control, which bypasses the
+ # in-game display setting entirely.
+ window.content_scale_size = fullscreen_canvas_size if fullscreen else Vector2i.ZERO
+
+func apply_display() -> void:
+ var window: Window = get_window()
+ if DisplayServer.get_name() == "headless":
+  display_initialized = true
+  return
+ native_fullscreen_pending = false
+ var target_fullscreen: bool = int(values["window_mode"]) == 1
+ if target_fullscreen:
+  if display_initialized and not is_fullscreen_mode(window.mode):
+   fullscreen_canvas_size = current_layout_size()
+  elif fullscreen_canvas_size == Vector2i.ZERO:
+   fullscreen_canvas_size = Vector2i(values["resolution"])
+ apply_content_scale()
+ if target_fullscreen:
+  requested_window_mode = Window.MODE_FULLSCREEN
   window.mode = Window.MODE_FULLSCREEN
  else:
+  requested_window_mode = Window.MODE_WINDOWED
   window.mode = Window.MODE_WINDOWED
   window.borderless = false
   var dimensions: Vector2i = values["resolution"]
@@ -101,6 +176,29 @@ func apply_display() -> void:
   window.size = dimensions
   var usable: Rect2i = DisplayServer.screen_get_usable_rect()
   window.position = usable.position+(usable.size-window.size)/2
+ display_initialized = true
+
+func _process(_delta: float) -> void:
+ var window: Window = get_window()
+ var mode: int = window.mode
+ var was_fullscreen: bool = is_fullscreen_mode(observed_window_mode)
+ var fullscreen: bool = is_fullscreen_mode(mode)
+ sync_native_fullscreen_transition(mode)
+ if fullscreen != was_fullscreen:
+  var requested: bool = requested_window_mode >= 0 and is_fullscreen_mode(requested_window_mode) == fullscreen
+  if fullscreen:
+   if not requested and last_windowed_layout_size.x > 0 and last_windowed_layout_size.y > 0:
+    fullscreen_canvas_size = last_windowed_layout_size
+   values["window_mode"] = 1
+  else:
+   values["window_mode"] = 0
+  native_fullscreen_pending = false
+  apply_content_scale()
+  requested_window_mode = -1
+  settings_changed.emit()
+ observed_window_mode = mode
+ if requested_window_mode == mode: requested_window_mode = -1
+ if not fullscreen: remember_stable_window_size()
 
 func track_environment(world: WorldEnvironment) -> void:
  environments.append(weakref(world))

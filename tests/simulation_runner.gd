@@ -13,12 +13,17 @@ var blue_cycle: int = 0
 var initialized: bool = false
 var conditional: bool = false
 var generated_boundary: bool = false
+var fine_plan: bool = false
 
 func _ready() -> void:
  seed(20261020)
  conditional = "--conditional" in OS.get_cmdline_user_args()
  generated_boundary = "--boundary" in OS.get_cmdline_user_args()
- if conditional:
+ fine_plan = "--fine-plan" in OS.get_cmdline_user_args()
+ if fine_plan:
+  conditional=true
+  for kind: String in UnitCatalog.TYPES: TacticalBrain.save_opening_program(TacticExamples.for_unit(kind))
+ if conditional and not fine_plan:
   for kind: String in UnitCatalog.TYPES:
    var program: Dictionary = UnitTacticProgram.default_program(kind)
    program["rules"] = [{"id":"critical_retreat","when":{"fact":"self_hp","op":"lt","value":0.25},"actions":{"behavior":"retreat","skill_usage":"hold"}},{"id":"visible_skill","when":{"all":[{"fact":"skill_ready","op":"eq","value":true},{"fact":"target_visible","op":"eq","value":true}]},"actions":{"skill_usage":"try"}}]
@@ -85,7 +90,8 @@ func _physics_process(delta: float) -> void:
    "peak_population":peak_population,"peak_projectiles":peak_projectiles,"failures":failures,
    "blue_hp":arena.bases[0].current_hp,"red_hp":arena.bases[1].current_hp
   }
-  var prefix: String = "boundary-original-simulation-" if generated_boundary else "ai-lab-simulation-" if conditional else "launcher-simulation-"
+  var prefix: String = "tactic-v2-simulation-" if fine_plan else "boundary-original-simulation-" if generated_boundary else "ai-lab-simulation-" if conditional else "launcher-simulation-"
+  if "--map-overhaul" in OS.get_cmdline_user_args(): prefix="map-overhaul-simulation-"
   var file: FileAccess = FileAccess.open("res://artifacts/"+prefix+arena.map_id+".json",FileAccess.WRITE)
   file.store_string(JSON.stringify(report,"  "))
   print("SIM_RESULT " + JSON.stringify(report))

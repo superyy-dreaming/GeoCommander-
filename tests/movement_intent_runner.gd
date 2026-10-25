@@ -26,7 +26,7 @@ func probe(map_id: String, team: int) -> void:
  var arena: LaboratoryArena = LaboratoryArena.new()
  arena.comparison = true
  arena.map_id = map_id
- arena.layout = [LaboratoryPresets.unit("square",team,1000 if team == 0 else 1400,350),LaboratoryPresets.unit("square",1-team,1400 if team == 0 else 1000,350)]
+ arena.layout = [LaboratoryPresets.unit("square",team,1000 if team == 0 else 1400,130),LaboratoryPresets.unit("square",1-team,1400 if team == 0 else 1000,130)]
  viewport.add_child(arena)
  await get_tree().physics_frame
  var unit: BaseGeoUnit = arena.units_for(team)[0]

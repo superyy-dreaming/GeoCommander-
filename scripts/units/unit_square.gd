@@ -19,17 +19,19 @@ func try_cast_skill() -> bool:
    should_deploy = true
  if (String(rule.get("skill_cond")) == "on_cooldown" or String(rule.get("skill_usage","auto")) == "try"):
   should_deploy = target_valid()
+ if not requested_skill.is_empty(): should_deploy = true
  if not should_deploy:
   return false
  var direction: Vector2 = Vector2.RIGHT.rotated(visual_root.rotation)
  if target_valid():
   direction = global_position.direction_to(current_target.global_position)
+ if not requested_skill.is_empty(): direction = global_position.direction_to(SkillRequest.point(self,requested_skill))
  var barrier: PrismBarrier = PrismBarrier.new()
  barrier.arena = arena
  barrier.team = team
  barrier.position = global_position + direction * 34.0
  barrier.rotation = direction.angle()
- if String(rule.get("skill_cond")) == "reflect_laser" and target_valid():
+ if ((requested_skill.is_empty() and String(rule.get("skill_cond")) == "reflect_laser") or (requested_skill.get("purpose") == "reflect" and requested_skill.get("aim","auto") != "direction")) and target_valid():
   var closest_diamond: BaseGeoUnit = null
   var closest_distance: float = 380.0
   for friend: BaseGeoUnit in allies():
@@ -46,4 +48,5 @@ func try_cast_skill() -> bool:
  arena.add_child(barrier)
  skill_left = skill_cd
  skill_started()
+ skill_finished()
  return true

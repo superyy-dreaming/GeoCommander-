@@ -1,6 +1,10 @@
 class_name CombatContext
 extends Node2D
 
+signal flux_pickup_reported(unit: BaseGeoUnit, amount: int)
+signal scan_reported(unit: BaseGeoUnit)
+signal tactic_event(unit: BaseGeoUnit, message: String)
+signal skill_lifecycle(unit: BaseGeoUnit, status: String, serial: int, reason: String)
 signal unit_added(unit: BaseGeoUnit)
 signal unit_removed(unit: BaseGeoUnit)
 signal profile_changed(team: int, profile: Dictionary)
@@ -17,10 +21,14 @@ var reflectors: Array[LaserReflector] = []
 var local_bases: Array[CoreMatrixBase] = []
 var local_prisms: Array[EnergyPrism] = []
 var navigation: ArenaObstacles
+var terrain: TerrainRuntime
 var local_profiles: Array[Dictionary] = []
 var active: bool = true
 var tactic_decisions: int = 0
 var tactic_usec: int = 0
+var plan_usec: int = 0
+var cover_usec: int = 0
+var cover_queries: int = 0
 
 func is_combat_active() -> bool:
  return active
@@ -106,3 +114,12 @@ func capture_objective(unit: BaseGeoUnit) -> Vector2:
    if prism.capture_owner != unit.team: return prism.global_position+Vector2(-direction*25,0)
  var base: CoreMatrixBase = base_for(1-unit.team)
  return base.global_position if is_instance_valid(base) else unit.global_position
+
+func perceived_enemies(observer: BaseGeoUnit) -> Array[BaseGeoUnit]:
+ var result: Array[BaseGeoUnit] = []
+ for unit: BaseGeoUnit in units_for(1-observer.team):
+  if not is_instance_valid(terrain) or terrain.can_perceive(observer,unit): result.append(unit)
+ return result
+
+func reveal_targets(team: int, center: Vector2, radius: float) -> void:
+ if is_instance_valid(terrain): terrain.reveal(team,center,radius)

@@ -33,7 +33,7 @@ func run() -> void:
  var arena: MainArena = get_tree().current_scene as MainArena
  check(is_instance_valid(arena) and arena.phase == MainArena.Phase.PREPARING,"真实场景切换进入战前准备")
  check(TacticalBrain.last_prompts[0] == opening,"场景切换后开局指令未被初始化清除")
- check(get_window().content_scale_size == Vector2i(1920,1080),"进入战场恢复原有逻辑画布尺寸")
+ check(get_window().content_scale_size == Vector2i.ZERO,"进入战场沿用窗口模式的原生逻辑画布")
  arena.start_match()
  arena.hud.call("request_menu_exit")
  var dialog: ConfirmationDialog = arena.hud.get("return_dialog") as ConfirmationDialog

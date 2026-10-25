@@ -7,14 +7,14 @@ static func objective_for(context: CombatContext, unit: BaseGeoUnit) -> Vector2:
  var stance: String = String(unit.rule.get("stance",profile["stance"]))
  var lane: String = String(unit.rule.get("lane_mode",profile.get("lane_mode","auto")))
  if lane != "auto":
-  var y: float = 675.0 if lane == "mid" else (260.0 if unit.spawn_index % 2 == 0 else 1090.0)
-  var progress_x: float = unit.global_position.x if unit.team == 0 else 2400.0-unit.global_position.x
-  for gate: float in [700.0,1200.0,1750.0]:
+  var y: float = MapCatalog.CENTER.y if lane == "mid" else (240.0 if unit.spawn_index % 2 == 0 else 1110.0)
+  var progress_x: float = unit.global_position.x if unit.team == 0 else MapCatalog.WORLD_SIZE.x-unit.global_position.x
+  for gate: float in [675.0,1200.0,1725.0]:
    if progress_x < gate-70.0:
-    return Vector2(gate if unit.team == 0 else 2400.0-gate,y)
+    return Vector2(gate if unit.team == 0 else MapCatalog.WORLD_SIZE.x-gate,y)
   return context.base_for(1-unit.team).global_position
  if stance == "defensive":
-  return Vector2(700 if unit.team == 0 else 1700, 675)
+  return Vector2(675 if unit.team == 0 else 1725, MapCatalog.CENTER.y)
  if stance == "aggressive" or unit.spawn_index % 3 == 0:
   return context.base_for(1-unit.team).global_position
  return context.capture_objective(unit)
@@ -39,5 +39,4 @@ static func formation_anchor(context: CombatContext, unit: BaseGeoUnit) -> Vecto
    count += 1
  if count == 0:
   return context.base_for(unit.team).global_position + Vector2(direction * 160.0, 0)
- return (center / float(count) - Vector2(direction * 185.0, 0)).clamp(Vector2(130,130), Vector2(2270,1220))
-
+ return (center / float(count) - Vector2(direction * 185.0, 0)).clamp(Vector2(130,130), MapCatalog.WORLD_SIZE-Vector2(130,130))
