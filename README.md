@@ -1,188 +1,143 @@
-# GeoCommander-
+# GeoCommander · 几何最高指挥官
 
-纯程序化几何战术游戏。部署五种兵种，通过中文或英文指令改变自动战斗行为，对抗本地 AI 指挥官。
+用部署和战术指令指挥五种几何兵种，争夺能源，摧毁敌方核心。
 
-## 启动
+GeoCommander 是一个基于 **Godot 4.7.2 / GDScript** 的原生桌面战术游戏。单位自主战斗，你负责阵容、战术与全局技能；也可以在提示词实验室中，把自然语言转成可检查、可编辑、可回放的行动方案。
 
-本机双击 `run.command`，或在项目目录运行：
+**单人对局可离线运行。AI 编译为可选功能，需自行配置 OpenAI 兼容接口。**
 
-```sh
-./run.command
-```
+[快速启动](#快速启动) · [实机截图](docs/screenshots/README.md) · [完整操作手册](docs/game-guide.md) · [AI 配置指南](docs/ai-laboratory.md)
 
-也可以使用 Godot **4.7.2 Stable 标准版**导入 `project.godot`。本机引擎隔离安装在 `~/.local/share/geocommander/tools/4.7.2/Godot.app`，没有修改系统 PATH。其他位置的引擎可通过 `GEO_GODOT` 环境变量指定：
+![GeoCommander 折光阵列实机对战，展示双方单位、能源点、部署卡、战术终端和全局技能](docs/screenshots/battle.png)
 
-```sh
-GEO_GODOT='/path/to/Godot' ./run.command
-```
+*折光阵列中的真实单人对局。图中部署经过资源扣除，单位按正式规则移动、攻击和施放技能。*
 
-首次从其他机器复制项目时，先执行一次导入：
+## 可以体验什么
 
-```sh
-./run.command --headless --import
-```
+- **五兵种协同**：冲刺绕后、护盾反射、引力聚怪、激光折射、治疗与扫描。红蓝阵营拥有相同的兵种体系。
+- **六张战术地图**：预览与实战共用地图数据，包含墙体、晶簇、加速轨、星云、虫洞、闸门和反应堆等不同组合。
+- **两种指挥方式**：战中用中英文关键词调整整队战术；战前在实验室中编排单兵种的方向、时间、路径、掩体和技能。
+- **可观察的验证场**：自由布阵、同种子默认战术对照、实际伤害与治疗统计、步骤读数、暂停和逐帧调试。
+- **纯程序化视觉**：几何、shader 与 HDR 发光构成战场，中文使用系统字体。全局字号支持 100% 至 180%，并提供低动效和等比全屏。
 
-渲染采用 Forward+、4x 2D MSAA 和 HDR。Apple Silicon 使用 Metal。最低窗口 1280×720，推荐 1440×900 或更高。首轮着色器编译可能比后续启动慢。
+## 提示词实验室
 
-## 开始界面与六张地图
+进入「兵种演练 → 提示词 · 布阵验证」，为各兵种保留独立提示词、JSON 和开局配置，也可填写共享的整体提示词。
 
-启动后进入首页，可选择“单人游戏”“多人游戏”“设置”，或通过独立入口进入“兵种演练”。多人页面仅展示开发中的创建与加入菜单，多人菜单不会发起网络请求。
+**编辑提示词 → AI 生成 → 本地校验 → 检查步骤 → 应用并重跑 → 明确应用为开局**
 
-单人页提供六张全部解锁的地图，左侧选择，右侧预览实际地形，再点击“进入战前准备”。六图具有相同兵种、经济与胜负规则，统一使用2400×1350世界空间（地图空间版本3）：
+![提示词实验室，左侧为兵种提示词与反馈验证，右侧为独立布阵战场和结果读数](docs/screenshots/laboratory.png)
 
-| 地图 | 特点 |
-|---|---|
-| 均衡前线 | 标准三路防线，动态闸门与隐匿星云 |
-| 双翼迂回 | 南北单向加速轨与侧翼星云，适合高速包抄 |
-| 折光阵列 | 中央三向分光棱镜与六处晶簇 |
-| 盘旋堡垒 | S型斜向墙体与一对虫洞 |
-| 交叉火线 | X型走廊、两对虫洞、动态闸门和星云 |
-| 晶脉迷城 | 中央过载反应堆、Flux拾取物和隐匿星云 |
+*此图载入内置三角编排示例并通过本地校验，未发起模型请求。完整画廊另有步骤编辑与运行读数。*
 
-选图在本次程序运行内保留，重新开局沿用当前地图；退出程序后默认均衡前线。准备矩阵仍可编辑后开战。战中返回首页需要确认，确认期间暂停，取消后继续。
+例如，可以将下面的意图拆成持续执行的步骤：
 
-## 兵种演练
+> 向上移动 2 秒；寻找能遮挡目标菱形直射的可达墙体后方；等待冲刺就绪，最多 5 秒；移动到菱形背后；满足实际背刺条件后冲刺；完成后返回掩体并循环。生命低于 30% 时中断并撤退。
 
-首页“兵种演练”提供五兵种真实 HP、速度、射程、费用和技能冷却；“协同需求”为说明评级，不参与结算。低于1600px时名册改为横向选择条，档案独立滚动，演武完整等比缩放。
+模型输出须通过字段、能力和地图校验，再由游戏执行。无路可走、目标失效或技能条件不满足时会显示原因；支持的表达边界见[精细战术编排](docs/tactic-plan.md)。截图展示编辑与短时执行，不代表这条方案在所有阵容下都能完成循环。
 
-独立物理世界中的演武可切换自动循环、手动普攻和技能、重置。每1.5秒尝试普攻、每3.5秒尝试技能，当前动作结束后再触发。演示刷新冷却与站位，正式数值保持 UnitCatalog 配置。六边形没有直接普攻。
+无需 API Key 也能使用内置示例、手动编辑 JSON 和运行验证。启用 AI 时，在「设置 → LLM」配置 Base URL、Key 和模型，测试连接后再生成。Key 仅保留本次运行；提示词与实验方案保存在本机。详见 [API 与实验室指南](docs/ai-laboratory.md)。
 
-“应用为默认开局指令”经过真实编译后只在本次运行保留，返回首页和重开不清除，退出程序后恢复默认。仅选择兵种不保存指令。“选择地图”进入单人页，“返回首页”退出演武并清理上下文。
+## 五种兵种，从演练开始
 
-菜单支持鼠标、Tab / Shift+Tab 和 Enter / Space，滚动区域跟随焦点。
+兵种演练使用真实战斗实现，可以手动触发普攻、技能或自动循环，查看生命、射程、冷却与协同效果。
 
-提示词实验室提供整体提示词和五兵种独立草稿、AI JSON 校验、六图双方自由布阵与预设、同种子默认对照、实际统计和规则读数。“应用当前兵种为开局”只替换当前兵种，战前矩阵直接保留已编译规则。
+![圆形兵种档案与真实引力技能演练](docs/screenshots/academy.png)
 
-精细编排 v2 支持方向和时长、航点、真实掩体与探出、绕后、定向技能、分支、循环和可恢复中断。“步骤”页可编辑并撤销，“编辑路径”模式可拖动航点；暂停后可逐帧或运行到下一步骤。见[操作、规则与迁移说明](docs/tactic-plan.md)及[验证记录](docs/tactic-plan-verification.md)。
+*圆形的引力聚怪演示。演武刷新冷却与站位，正式对局使用各兵种原始冷却。*
 
-## 本机设置
-
-首页和战场顶部都可打开设置，包含显示、界面、LLM、操作与关于四页。战中打开会暂停单位、经济、计时和冷却，关闭恢复打开前的暂停状态。字号调整保留战术草稿和输入内容。
-
-- 窗口或全屏；窗口尺寸1280×720、1440×810、1440×900、1920×1080。默认1440×810，不适合当前屏幕的尺寸不可选。进入全屏时会捕获当前实际窗口布局，文字、按钮、面板与战场整体等比放大；手动调整过窗口尺寸也会保持眼前排版，显示器宽高比不同时居中留边。游戏内切换仍需在15秒内确认，取消或超时恢复；macOS原生全屏入口使用同一缩放规则。
-- 字号100%、115%、130%、150%、180%，覆盖菜单、档案、演武读数、HUD、矩阵与确认窗，不改变世界和单位尺寸。
-- 发光0%–150%，默认100%；0%关闭发光。低动效关闭扫描和拖尾、减少碎片并取消淡出。
-- 镜头速度50%–200%，默认100%。操作页提供快捷键、玩法与版本说明。
-- 普通设置即时生效并自动保存；保存失败明确提示并提供重试。“恢复默认”需要确认，不清除战局或开局指令。
-
-配置保存为 `user://settings.cfg`；macOS 默认位于 `~/Library/Application Support/Godot/app_userdata/GeoCommander/settings.cfg`。损坏或不支持版本的配置保留 `.invalid-*` 备份，并恢复默认。自动测试使用独立测试配置，不覆盖正式设置。开局指令、选图和战局不写入此配置。
-
-## 玩法与操作
-
-准备阶段可以在战术矩阵中编辑规则，也可以直接开始对局。初始阵容免费，双方各有九个单位、180 Flux，基础收入每秒 12 Flux。两个能源棱镜各提供每秒 6 Flux。
-
-| 操作 | 键位 |
-|---|---|
-| 部署三角、方形、圆形、菱形、六边形 | `1`、`2`、`3`、`4`、`5` |
-| 移动镜头 | `WASD` 或方向键 |
-| 缩放 | 鼠标滚轮 |
-| 电磁脉冲、矩阵超频、拓扑转移 | `Z`、`X`、`C`，然后左键选择位置 |
-| 取消瞄准 | 右键或 `Esc` |
-| 打开战术矩阵 | 未编辑文本时按 `Tab`，或点击矩阵按钮 |
-| 矩阵内部导航 | `Tab` / `Shift+Tab`，焦点在矩阵内循环 |
-| 退出编辑 / 关闭矩阵 | `Esc` |
-
-单位自动选择目标、占点和战斗。生命值通过几何内部填充表达，没有浮动血条。每队最多 30 单位，六边形最多 2 个。
-
-- **三角**：高速近战、冲刺穿刺、背刺暴击。
-- **方形**：高生命前线单位，部署阻挡敌军和弹体的反射护盾。友军可以穿过护盾。
-- **圆形**：脉冲弹体和聚集拉拽，坍缩会提示附近三角协同冲刺。
-- **菱形**：远程弹体、风筝和最多两次反射的激光。折射战术会让菱形和方形尝试配合镜面角度。
-- **六边形**：范围治疗和增益。每个存活六边形使终端与全局技能冷却恢复速度增加 40%。全部阵亡后终端锁定，重新部署恢复。
-
-十分钟内摧毁敌方基地即获胜。超时比较基地剩余生命百分比，完全相同为平局。结算页自动聚焦重新开局按钮，点击或按 `Enter` 即可重开。
-
-## 战术指令
-
-每次提交都从默认规则重新编译，并替换整套战术。同一条指令可以组合要求，冲突字段按文字出现顺序覆盖。
-
-```text
-三角形绕后切菱形
-正方形折射激光，菱形棱镜配合
-保护六边形
-全军突击
-风筝拉扯
-均衡战术
-中路推进，晶簇折射
-分推，保护六边形
-mid lane, crystal bounce
-flank assassin
-refract bounce
-```
-
-终端基础冷却 30 秒。无法识别的指令不改变当前配置、不消耗冷却。矩阵中的编辑和撤退阈值滑块仅修改草稿，提交后才应用；战中与终端共享冷却及链路限制，打开矩阵不暂停战斗。
-
-战中终端继续采用本地关键词解析，提交会替换整队战术。兵种演练中的“提示词 · 布阵验证”可通过自行配置的 OpenAI 兼容服务将自然语言编译为单兵种行动编排 JSON，兼容已有 v1 条件规则。操作与规则见[精细战术编排](docs/tactic-plan.md)，API 配置见 [AI 提示词实验室](docs/ai-laboratory.md)。Key 仅保留本次运行。
-
-## 战术地形
-
-六图的预览、正式对局、实验室、导航及AI地图摘要共用`MapCatalog`。墙体使用倒角堡垒、V形墙、楔形胸墙和六棱立柱；墙、晶簇、关闭的闸门阻挡真实移动与攻击。V形墙按凹轮廓分解碰撞，不把凹口填平。预览为独立HDR物理世界，仅绘制地图，不推进战斗与机关。
-
-普通激光最多750px、两次反射，护盾每次增伤35%，晶簇每次增伤25%。命中中央分光棱镜后最多分裂一次：中束85%、两侧±26°各75%，每束650px并继承已用反射次数。同次施法对同一目标只结算最高命中伤害。
-
-加速轨同向主动移动×1.75、逆向×0.65；熵减区×0.65，和超频、虫洞移速增益相乘，不放大拉拽与击退。隐匿星云限制敌军锁定；同星云、145px近距或被扫描/EMP显形的单位仍可被感知，范围伤害和已发射攻击仍能命中。六边形扫描为独立技能，不影响治疗。
-
-虫洞每单位8秒冷却，每对5次、耗尽14秒恢复；动态闸门20秒关闭、15秒开放。反应堆每55秒结算一次，最后6秒预警，爆炸160伤害并产生三个各50 Flux拾取物。准备、暂停及结束阶段停止机关结算。
-
-AI使用共享路网、动态拓扑和0°/±38°三射线处理目的地移动。方向步骤保持指定方向，不擅自绕行。普通AI默认避开反应堆预警，精细方案需要明确授权。详见[地图、机关与地形提示词](docs/map-overhaul.md)和[本轮验证](docs/map-overhaul-verification.md)。
-
-## 全局技能
-
-| 技能 | 消耗 / 基础冷却 | 效果 |
+| 兵种 | 定位 | 关键能力 |
 |---|---|---|
-| EMP STRIKE | 40 Flux / 22 秒 | 200px 范围伤害、2.8 秒控制，中断敌军冲刺和激光蓄力 |
-| OVERCLOCK | 50 Flux / 25 秒 | 240×240 区域持续 5 秒，友军移动速度 +60%、技能冷却恢复速度 ×2 |
-| WARP SWAP | 45 Flux / 30 秒 | 点击敌军附近，将基地 350px 内的三角和方形传送到目标区域；否则把点击点 160px 内友军送到最近六边形周围 |
+| 三角 · 锐角突击 | 近战突袭 | 蓄力冲刺、穿刺与背刺 |
+| 方形 · 棱镜壁垒 | 前线保护 | 友军可穿越的护盾、激光反射 |
+| 圆形 · 轨道坍缩 | 聚怪控制 | 脉冲弹体、引力拉拽与坍缩 |
+| 菱形 · 折射狙击 | 远程输出 | 风筝、蓄力激光与最多两次反射 |
+| 六边形 · 全域共鸣 | 支援指挥 | 治疗、冷却恢复加速与独立扫描，无直接普攻 |
 
-传送没有可用单位、锚点或安全落点时会提示原因，不扣费。技能选中和取消不扣费，只有有效施放才消耗资源并进入冷却。
+## 六张地图
 
-## 验证命令
+六图全部解锁，使用相同的兵种、经济与胜负规则。点击地图名称查看对应的实机选择界面。
+
+| 地图 | 地形与机关 | 战术重点 |
+|---|---|---|
+| [均衡前线](docs/screenshots/map-balanced.png) | 三路防线、动态闸门、隐匿星云 | 入门与阵容协同 |
+| [双翼迂回](docs/screenshots/map-flanks.png) | 南北加速轨、侧翼星云 | 快速推进与包抄 |
+| [折光阵列](docs/screenshots/map-refraction.png) | 中央分光棱镜、六处晶簇 | 折射与远程协同 |
+| [盘旋堡垒](docs/screenshots/map-spiral_fortress.png) | S 型墙体、一对虫洞 | 绕行与转移 |
+| [交叉火线](docs/screenshots/map-crossfire.png) | X 型走廊、两对虫洞、闸门 | 多入口交战 |
+| [晶脉迷城](docs/screenshots/map-crystal_maze.png) | 过载反应堆、Flux 拾取物、星云 | 危险区撤离与资源争夺 |
+
+![单人游戏的六图选择界面，当前为折光阵列](docs/screenshots/map-refraction.png)
+
+详细行为与提示词写法见[地图与交互地形](docs/map-overhaul.md)。
+
+## 快速启动
+
+当前已在 **macOS / Apple Silicon / Metal** 验证。项目使用 **Godot 4.7.2 Stable 标准版**，不需要 .NET；其他平台尚未完成实机验收，当前不提供签名安装包。
+
+1. 克隆项目：
+
+   ```sh
+   git clone https://github.com/superyy-dreaming/GeoCommander-.git
+   cd GeoCommander-
+   ```
+
+2. 使用 Godot 4.7.2 项目管理器导入根目录的 `project.godot`，完成首次导入后按 `F5` 运行项目。
+
+   macOS 也可通过启动脚本指定自己的引擎：
+
+   ```sh
+   GEO_GODOT="/Applications/Godot.app/Contents/MacOS/Godot" ./run.command --headless --import
+   GEO_GODOT="/Applications/Godot.app/Contents/MacOS/Godot" ./run.command
+   ```
+
+   `run.command` 不会安装引擎。未指定 `GEO_GODOT` 时，它会查找本机隔离目录 `~/.local/share/geocommander/tools/4.7.2/Godot.app`。
+
+3. 首页选择「单人游戏 → 地图 → 进入战前准备」，编辑矩阵或直接开始。想先了解单位，可进入「兵种演练」。
+
+最低窗口 **1280×720**，推荐 **1920×1080** 查看完整工具区。使用 Forward+、2D HDR 与 4× MSAA；首次着色器编译可能较慢。
+
+## 一局怎么玩
+
+初始阵容免费，双方各有九个单位和 180 Flux。基础收入每秒 12 Flux，占领能源棱镜可增加收入。每方上限 30 单位，其中六边形最多 2 个。
+
+单位自动选敌、移动和战斗。你可以持续部署，并使用 EMP、超频区和拓扑转移改变局部战况。一局最长十分钟，摧毁敌方基地立即获胜；超时比较基地生命百分比，相同则平局。
+
+| 操作 | 快捷键 |
+|---|---|
+| 按三角、方形、圆形、菱形、六边形顺序部署 | `1` / `2` / `3` / `4` / `5` |
+| 移动镜头 / 缩放 | `WASD` 或方向键 / 滚轮 |
+| EMP / 超频 / 拓扑转移 | `Z` / `X` / `C`，再点击战场 |
+| 打开战术矩阵 | `Tab`（未编辑文字时） |
+| 取消技能瞄准 | 右键或 `Esc` |
+
+战中终端支持「三角形绕后切菱形」「保护六边形」「分推，晶簇折射」等关键词。提交会**替换整队战术**；实验室的「应用开局」则只替换当前兵种。完整规则和快捷键见[操作手册](docs/game-guide.md)。
+
+## 文档与验证
+
+| 想了解什么 | 入口 |
+|---|---|
+| 首页、六图、演练、设置、战斗与实验室截图 | [14 张原生实机截图](docs/screenshots/README.md) |
+| 全部操作、资源规则、设置与验证命令 | [操作与开发手册](docs/game-guide.md) |
+| LLM 配置、提示词与实验保存 | [AI 提示词实验室](docs/ai-laboratory.md) |
+| 行动步骤、路径、掩体、条件与中断 | [精细战术编排](docs/tactic-plan.md) |
+| 六图机关、隐匿感知与数据迁移 | [地图与地形系统](docs/map-overhaul.md) |
+| 已有模型生成与行为回放证据 | [真实模型验证](docs/real-llm-verification.md) |
+| 地图与镜头修复验证记录 | [地图验证](docs/map-overhaul-verification.md) · [镜头稳定性](docs/camera-jitter-verification.md) |
+
+基础检查（使用启动脚本时需先配置引擎路径）：
 
 ```sh
 ./run.command --headless --import
 ./run.command --headless --scene res://tests/check_scripts.tscn
-./run.command --headless --scene res://tests/map_overhaul_runner.tscn
 ./run.command --headless --scene res://tests/test_runner.tscn
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/v2_test_runner.tscn
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/v2_combat_runner.tscn
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/scene_flow_runner.tscn
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/navigation_probe.tscn
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/simulation_runner.tscn
-./run.command --headless --fixed-fps 60 --scene res://tests/launcher_test_runner.tscn
-./run.command --headless --scene res://tests/launcher_test_runner.tscn -- --persist-read
-./run.command --headless --fixed-fps 60 --scene res://tests/simulation_runner.tscn -- --map=flanks
-./run.command --headless --fixed-fps 60 --scene res://tests/simulation_runner.tscn -- --map=refraction
-./run.command --scene res://tests/launcher_native_flow.tscn -- --geo-test
-./run.command --scene res://tests/fullscreen_scale_native.tscn -- --geo-test
-./run.command --scene res://tests/fullscreen_titlebar_native.tscn -- --geo-test
-./run.command --scene res://tests/performance_runner.tscn -- --geo-test --launcher
-./run.command --scene res://tests/launcher_visual_runner.tscn -- --geo-test
-python3 tests/encode_captures.py launcher-visual-report.json
+./run.command --headless --scene res://tests/map_overhaul_runner.tscn
 ```
 
-`fullscreen_scale_native`验证直接`Window.mode`入口；`fullscreen_titlebar_native`需要按终端提示实际点击系统绿色按钮，并从系统 Window 菜单退出全屏，验证两种不同的事件顺序。最后一条仅用于 QA 截图，需要 NumPy 和 Pillow。它把 Godot 的真实 HDR 线性帧缓冲编码成 sRGB PNG，不增加、修改任何画面元素。游戏运行不依赖 Python 或第三方库。
+主要源码：`scripts/core/` 为战斗、地图和战术执行；`scripts/units/` 为五兵种；`scripts/lab/` 为实验上下文；`scripts/ui/` 为原生界面。各场景共用 `CombatContext` 与 `MapCatalog`。
 
-`artifacts/` 保存测试日志、截图与报告，`.godot/` 保存引擎缓存，两者均不属于运行源码。仓库仅保留 `artifacts/` 中八份不含凭据的真实模型 JSON 回放样例，其余日志、截图、报告与源码快照为本机验收产物，不随 Git 分发；验证文档中的这些产物链接需在本机查看或运行对应测试重新生成。AI 实验室操作见 [使用说明](docs/ai-laboratory.md)，最新两栏布局、40%反馈区、战场菜单与悬浮读数见 [布局验证](docs/laboratory-layout-verification.md)，窗口与全屏的等比呈现见 [全屏缩放验证](docs/fullscreen-scaling-verification.md)。AI实验室原有验证见 [行为验证](docs/ai-laboratory-verification.md)。此前验证记录见 [首页、地图与设置验证](docs/launcher-verification.md)，旧版记录保留在 [V2 验证](docs/verification.md)。
+## 当前范围
 
-克隆后可离线回放已验证的模型输出，无需 API Key：
+当前是可本机运行的单人 MVP。多人游戏仅有菜单，尚无联网对战；不含音频、战局存档或内置 LLM 账号。实验文件与游戏设置可保存，默认开局指令只在本次运行内生效。
 
-```sh
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/real_llm_runner.tscn -- --replay
-./run.command --headless --fixed-fps 60 --disable-vsync --scene res://tests/boundary_tactic_runner.tscn -- --replay
-```
-
-上述固定帧参数仅用于保存的 JSON 战斗回放。向真实供应商发起 HTTP 请求时不要使用固定帧或倍速参数。
-
-SiliconFlow / DeepSeek-V4.1-Flash 的真实提示词生成、条件边界与实际技能验证，以及本轮修复和复现方式，见 [真实模型验证](docs/real-llm-verification.md)。
-
-三角已支持“沿边界绕后、用冲刺赶路、优先消灭菱形”的完整提示词；指定SiliconFlow模型采用实测的非思考JSON模式。操作、原文和生成与实战证据见 [边界绕后验证](docs/boundary-tactic-verification.md)。更新源码后需要重启游戏再生成。
-
-## 工程与边界
-
-入口为 `scenes/main_menu.tscn`。旧战场仍可独立运行：`./run.command --scene res://scenes/main_arena.tscn`。
-
-`CombatContext` 为正式战场与演武提供局部单位、反射面、战术和战斗信号，演武不改变正式经济、人口或终端状态。`main_arena.tscn` 只包含根节点和脚本，地图、碰撞、单位、特效、原生 HUD 均由代码构建。没有外部图片、音频或字体文件。`GameSettings` 负责本机设置，`MatchSession` 负责运行内选图与一次性开局请求，`MapCatalog` 提供地形与预览共用定义。`SignalBus` 负责事件，`TacticalBrain` 负责规则编译，兵种数值位于 `scripts/core/unit_catalog.gd`。
-
-当前交付是本机可玩的单人 MVP，不包含多人联网、战局存档、音频、签名安装包或内置 LLM 服务账号；可选 LLM 编译需自行配置兼容接口，也未承诺旧版 Godot 4.3 兼容性。
-
-原始需求文档保持原样。AI 实验室升级前的源码快照为 `artifacts/pre-ai-lab-source-backup.tar.gz`，此前另保留 `artifacts/pre-launcher-source-backup.tar.gz`，另保留 V1 快照。回滚前关闭游戏，将快照解压到独立目录，使用 Godot 导入其中的 `project.godot` 运行旧版，保留当前工程以便恢复。不要向当前目录覆盖式解压，以免遗留本轮新增脚本。回滚不删除本机设置或引擎，引擎无需重装。本项目不读写其他项目或系统配置。
+本页图片均来自当前项目原生运行画面，拍摄于 **2026-10-25**，经过 HDR 线性颜色到 sRGB 的显示编码，没有重绘界面。文档图片位于 `docs/screenshots/`，不作为游戏素材加载；引擎缓存、个人配置、API Key 和本地测试原始帧不会提交到仓库。
