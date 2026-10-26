@@ -18,10 +18,12 @@ var display_pending: bool = false
 var previous_display: Dictionary = {}
 var display_left: float = 0.0
 var category: String = "显示"
+var guide_label: Label
 
 func _ready() -> void:
  layer = 30
  process_mode = Node.PROCESS_MODE_ALWAYS
+ add_to_group("gameplay_input_blocker")
  root = ColorRect.new()
  (root as ColorRect).color = Color(0.003,0.009,0.018,0.94)
  root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -87,6 +89,8 @@ func _ready() -> void:
  root.add_child(reset_dialog)
  GameSettings.settings_changed.connect(settings_updated)
  GameSettings.persistence_changed.connect(update_status)
+ if not SignalBus.keybinds_updated.is_connected(_keybinds_updated):
+  SignalBus.keybinds_updated.connect(_keybinds_updated)
  CommanderTheme.refresh(root)
  select_category(category)
  root.hide()
@@ -112,6 +116,8 @@ func close_panel() -> void:
 
 func _exit_tree() -> void:
  if opened: get_tree().paused = previous_pause
+ if is_instance_valid(SignalBus) and SignalBus.keybinds_updated.is_connected(_keybinds_updated):
+  SignalBus.keybinds_updated.disconnect(_keybinds_updated)
 
 func make_label(text: String, base: int = 18) -> Label:
  var label: Label = Label.new()
@@ -139,6 +145,7 @@ func row(title: String, detail: String) -> VBoxContainer:
 
 func select_category(title: String) -> void:
  category = title
+ guide_label = null
  for key: String in tabs: (tabs[key] as Button).button_pressed = key == title
  for child: Node in content.get_children():
   content.remove_child(child)
@@ -184,15 +191,30 @@ func select_category(title: String) -> void:
  elif title == "LLM":
   content.add_child(LLMSettings.new())
  else:
-  add_slider("camera_speed","镜头移动速度","WASD 或方向键移动镜头，滚轮缩放。",0.5,2)
-  var guide: Label = make_label("数字 1-5：部署兵种\nZ / X / C：选择全局技能，点击战场确认施放\n右键 / Esc：取消瞄准\nTab：战术矩阵，战中打开不会暂停\n输入文字期间屏蔽战场快捷键\n\n占领南北能源点增加 Flux，摧毁敌方核心获胜。\n对局最长十分钟，超时比较双方核心剩余生命百分比。")
-  guide.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-  row("操作说明","").add_child(guide)
+  add_slider("camera_speed","镜头移动速度","屏幕边缘平移、滚轮缩放和中键拖动的速度。",0.5,2)
+  guide_label = make_label(operations_guide_text(),16)
+  guide_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+  row("操作说明","").add_child(guide_label)
+  row("自定义按键","冲突按键会自动交换，文本输入时不会触发战斗快捷键。").add_child(make_button("打开按键设置",open_keybinds))
   var version: Label = make_label("GeoCommander\n离线单人几何战术游戏。多人功能开发中。\nGodot "+Engine.get_version_info()["string"]+" · Forward+ · Metal · 2D HDR",16)
   version.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
   row("关于游戏","").add_child(version)
  CommanderTheme.refresh(root)
  update_status()
+
+func operations_guide_text() -> String:
+ var deploy: Array[String] = []
+ for kind: String in UnitCatalog.TYPES:
+  deploy.append(KeybindManager.get_key_label("spawn_"+kind)+" "+str(UnitCatalog.DATA[kind]["zh"]))
+ return "部署："+" / ".join(deploy)+"\n兵种技能："+KeybindManager.get_key_label("skill_triangle")+" / "+KeybindManager.get_key_label("skill_square")+" / "+KeybindManager.get_key_label("skill_circle")+" / "+KeybindManager.get_key_label("skill_diamond")+" / "+KeybindManager.get_key_label("skill_hexagon")+"\n全局技能："+KeybindManager.get_key_label("cmd_emp")+" / "+KeybindManager.get_key_label("cmd_overclock")+" / "+KeybindManager.get_key_label("cmd_swap")+"\n小队驻守 / 归还 AI："+KeybindManager.get_key_label("squad_hold_orbit")+" / "+KeybindManager.get_key_label("squad_return_ai")+"\n参谋方案："+KeybindManager.get_key_label("copilot_opt_1")+" / "+KeybindManager.get_key_label("copilot_opt_2")+" / "+KeybindManager.get_key_label("copilot_opt_3")+"，自动代理："+KeybindManager.get_key_label("copilot_toggle_auto")+"\n战术矩阵："+KeybindManager.get_key_label("toggle_tactical_drawer")+"\n屏幕边缘或中键移动镜头，滚轮以光标为中心缩放。左键选择/框选；右键移动或集火；Shift + 右键绘制小队航线。右键 / Esc 取消瞄准。\n输入文字期间屏蔽战斗快捷键。占领南北能源点增加 Flux，摧毁敌方核心获胜；对局最长十分钟。"
+
+func _keybinds_updated(_bindings: Dictionary) -> void:
+ if is_instance_valid(guide_label): guide_label.text = operations_guide_text()
+
+func open_keybinds() -> void:
+ var modal: Node = load("res://scripts/ui/keybind_settings_modal.gd").new()
+ add_child(modal)
+ modal.call("open_modal")
 
 func add_slider(key: String, title: String, detail: String, minimum: float, maximum: float) -> void:
  var section: VBoxContainer = row(title,detail)

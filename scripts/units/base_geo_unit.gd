@@ -38,6 +38,20 @@ var last_facts: Dictionary = {}
 var in_gravity: bool = false
 var gravity_sources: Dictionary = {}
 var selected: bool = false
+enum ControlAuthority { AUTO_AGENT, MANUAL_OVERRIDE, SQUAD_AI_SCOPED }
+var authority_state: ControlAuthority = ControlAuthority.AUTO_AGENT
+var manual_move_target: Vector2 = Vector2.INF
+var manual_attack_target: Node2D = null
+var manual_hold_timer: float = 0.0
+var manual_mode: String = "move"
+var manual_blocked_time: float = 0.0
+var manual_block_sample_time: float = 0.0
+var manual_block_sample_position: Vector2 = Vector2.ZERO
+var custom_squad_rule: Dictionary = {}
+var tactical_waypoints: Array[Vector2] = []
+var tactical_waypoint_index: int = 0
+var hold_orbit_center: Vector2 = Vector2.ZERO
+var hold_orbit_phase: float = 0.0
 var scripted_control: bool = false
 var scripted_direction: Vector2 = Vector2.ZERO
 var slow_sources: Dictionary = {}
@@ -63,6 +77,11 @@ var skill_active: bool = false
 var requested_skill: Dictionary = {}
 var skill_rejection: String = ""
 var boundary_maneuver: BoundaryManeuver = BoundaryManeuver.new()
+var copilot_saved_execution: TacticExecution
+var copilot_saved_rule: Dictionary = {}
+var copilot_saved_active_rule: Dictionary = {}
+var copilot_saved_decision_left: float = 0.0
+var copilot_active: bool = false
 
 func _ready() -> void:
  var data: Dictionary = UnitCatalog.DATA[unit_type]
@@ -117,7 +136,7 @@ func _ready() -> void:
  arena.register_unit(self)
 
 func _profile_updated(changed_team: int, profile: Dictionary) -> void:
- if changed_team == team:
+ if changed_team == team and authority_state == ControlAuthority.AUTO_AGENT and not copilot_active:
   base_rule = (profile["unit_rules"][unit_type] as Dictionary).duplicate(true)
   rule = base_rule.duplicate(true)
   decision_left = 0.0
@@ -126,13 +145,172 @@ func _profile_updated(changed_team: int, profile: Dictionary) -> void:
 
 func reset_execution() -> void:
  execution = null
- var program: Dictionary = base_rule.get("program",{})
+ var source_rule: Dictionary = custom_squad_rule if authority_state == ControlAuthority.SQUAD_AI_SCOPED and not custom_squad_rule.is_empty() else base_rule
+ rule = source_rule.duplicate(true)
+ var program: Dictionary = source_rule.get("program",{})
  if int(program.get("version",1)) == 2:
   execution = TacticExecution.new()
   execution.install(program)
 
 func is_plan_controlled() -> bool:
- return execution != null and not execution.use_base and not scripted_control
+ return execution != null and not execution.use_base and not scripted_control and authority_state != ControlAuthority.MANUAL_OVERRIDE
+
+func should_run_ai_decision() -> bool:
+ return not scripted_control and authority_state != ControlAuthority.MANUAL_OVERRIDE and not is_plan_controlled()
+
+func handle_manual_tick() -> bool:
+ if authority_state != ControlAuthority.MANUAL_OVERRIDE:
+  return false
+ if manual_mode == "attack" and is_instance_valid(manual_attack_target) and not bool(manual_attack_target.get("dead")):
+  current_target = manual_attack_target
+  basic_attack()
+ return true
+
+func set_squad_rule(value: Dictionary) -> void:
+ if copilot_active:
+  restore_copilot_rule()
+ custom_squad_rule = value.duplicate(true)
+ authority_state = ControlAuthority.SQUAD_AI_SCOPED
+ manual_move_target = Vector2.INF
+ manual_attack_target = null
+ tactical_waypoints.clear()
+ tactical_waypoint_index = 0
+ boundary_maneuver.reset()
+ reset_execution()
+ decision_left = 0.0
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func return_to_ai() -> void:
+ authority_state = ControlAuthority.SQUAD_AI_SCOPED if not custom_squad_rule.is_empty() else ControlAuthority.AUTO_AGENT
+ manual_move_target = Vector2.INF
+ manual_attack_target = null
+ tactical_waypoints.clear()
+ tactical_waypoint_index = 0
+ hold_orbit_center = Vector2.ZERO
+ boundary_maneuver.reset()
+ if authority_state == ControlAuthority.AUTO_AGENT:
+  base_rule = (arena.profile_for(team)["unit_rules"][unit_type] as Dictionary).duplicate(true)
+  rule = base_rule.duplicate(true)
+ else:
+  rule = custom_squad_rule.duplicate(true)
+ reset_execution()
+ decision_left = 0.0
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func set_manual_move(target: Vector2, duration: float = 4.0) -> void:
+ if copilot_active:
+  restore_copilot_rule()
+ authority_state = ControlAuthority.MANUAL_OVERRIDE
+ manual_move_target = target
+ manual_attack_target = null
+ manual_mode = "move"
+ manual_hold_timer = duration
+ _reset_manual_block_tracking()
+ tactical_waypoints.clear()
+ tactical_waypoint_index = 0
+ hold_orbit_center = Vector2.ZERO
+ if execution != null:
+  execution.status = "手动接管"
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func set_manual_attack(target: Node2D, duration: float = 6.0) -> void:
+ if copilot_active:
+  restore_copilot_rule()
+ authority_state = ControlAuthority.MANUAL_OVERRIDE
+ manual_move_target = Vector2.INF
+ manual_attack_target = target
+ manual_mode = "attack"
+ manual_hold_timer = duration
+ _reset_manual_block_tracking()
+ tactical_waypoints.clear()
+ tactical_waypoint_index = 0
+ if is_instance_valid(target): current_target = target
+ if execution != null:
+  execution.status = "手动接管"
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func set_hold_orbit() -> void:
+ if copilot_active:
+  restore_copilot_rule()
+ authority_state = ControlAuthority.MANUAL_OVERRIDE
+ manual_mode = "orbit"
+ manual_hold_timer = 0.0
+ hold_orbit_center = global_position
+ hold_orbit_phase = 0.0
+ manual_attack_target = null
+ manual_move_target = Vector2.INF
+ _reset_manual_block_tracking()
+ if execution != null:
+  execution.status = "手动接管"
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func set_tactical_path(points: Array[Vector2]) -> void:
+ if copilot_active:
+  restore_copilot_rule()
+ tactical_waypoints = points.duplicate()
+ tactical_waypoint_index = 0
+ custom_squad_rule = custom_squad_rule.duplicate(true)
+ authority_state = ControlAuthority.SQUAD_AI_SCOPED
+ manual_move_target = Vector2.INF
+ manual_attack_target = null
+ manual_hold_timer = 0.0
+ if execution != null:
+  execution.status = "小队航线"
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func release_manual_control() -> void:
+ if authority_state != ControlAuthority.MANUAL_OVERRIDE:
+  return
+ if not custom_squad_rule.is_empty():
+  authority_state = ControlAuthority.SQUAD_AI_SCOPED
+ else:
+  authority_state = ControlAuthority.AUTO_AGENT
+ manual_move_target = Vector2.INF
+ manual_attack_target = null
+ manual_hold_timer = 0.0
+ manual_blocked_time = 0.0
+ manual_block_sample_time = 0.0
+ hold_orbit_center = Vector2.ZERO
+ if execution != null:
+  execution.status = ""
+ SignalBus.control_authority_changed.emit(self,authority_state)
+
+func _reset_manual_block_tracking() -> void:
+ manual_blocked_time = 0.0
+ manual_block_sample_time = 0.0
+ manual_block_sample_position = global_position
+
+func apply_copilot_rule(value: Dictionary) -> void:
+ if authority_state != ControlAuthority.AUTO_AGENT or copilot_active:
+  return
+ copilot_saved_execution = execution
+ copilot_saved_rule = base_rule.duplicate(true)
+ copilot_saved_active_rule = rule.duplicate(true)
+ copilot_saved_decision_left = decision_left
+ copilot_active = true
+ base_rule = value.duplicate(true)
+ var proposed_program: Dictionary = base_rule.get("program",{})
+ if int(proposed_program.get("version",1)) == 2:
+  execution = TacticExecution.new()
+  execution.install(proposed_program)
+  rule = proposed_program["base"].duplicate(true)
+ else:
+  execution = null
+  rule = base_rule.duplicate(true)
+ decision_left = 0.0
+
+func restore_copilot_rule() -> void:
+ if not copilot_active:
+  return
+ base_rule = copilot_saved_rule.duplicate(true) if not copilot_saved_rule.is_empty() else (arena.profile_for(team)["unit_rules"][unit_type] as Dictionary).duplicate(true)
+ rule = copilot_saved_active_rule.duplicate(true) if not copilot_saved_active_rule.is_empty() else base_rule.duplicate(true)
+ execution = copilot_saved_execution
+ copilot_saved_execution = null
+ copilot_saved_rule.clear()
+ copilot_saved_active_rule.clear()
+ copilot_active = false
+ decision_left = copilot_saved_decision_left
+ copilot_saved_decision_left = 0.0
 
 func enemies() -> Array[BaseGeoUnit]:
  return arena.perceived_enemies(self)
@@ -168,12 +346,16 @@ func _physics_process(delta: float) -> void:
  overclock_left = maxf(0.0, overclock_left - delta)
  stun_left = maxf(0.0, stun_left - delta)
  under_attack_left = maxf(0.0, under_attack_left - delta)
- if is_plan_controlled():
+ if authority_state == ControlAuthority.MANUAL_OVERRIDE and manual_hold_timer > 0.0:
+  manual_hold_timer = maxf(0.0, manual_hold_timer - delta)
+ if authority_state == ControlAuthority.MANUAL_OVERRIDE and is_instance_valid(manual_attack_target):
+  current_target = manual_attack_target
+ if is_plan_controlled() and not (authority_state == ControlAuthority.SQUAD_AI_SCOPED and tactical_waypoint_index < tactical_waypoints.size()):
   var plan_started: int = Time.get_ticks_usec()
   execution.tick(self,delta)
   arena.plan_usec += Time.get_ticks_usec()-plan_started
  decision_left -= delta
- if decision_left <= 0.0 and not scripted_control and not is_plan_controlled():
+ if decision_left <= 0.0 and should_run_ai_decision():
   decide_tactic()
   decision_left = 0.15
  if stun_left > 0.0:
@@ -202,8 +384,9 @@ func _physics_process(delta: float) -> void:
 func decide_tactic() -> void:
  var started: int = Time.get_ticks_usec()
  arena.tactic_decisions += 1
- rule = base_rule.duplicate(true)
- var program: Dictionary = base_rule.get("program",{})
+ var source_rule: Dictionary = custom_squad_rule if authority_state == ControlAuthority.SQUAD_AI_SCOPED and not custom_squad_rule.is_empty() else base_rule
+ rule = source_rule.duplicate(true)
+ var program: Dictionary = source_rule.get("program",{})
  if not program.is_empty(): rule = program["base"].duplicate(true)
  if int(program.get("version",1)) == 2: program = {}
  evaluate_best_target()
@@ -245,6 +428,9 @@ func tactic_facts() -> Dictionary:
  return {"self_hp":current_hp/max_hp,"target_hp":hp,"target_type":kind,"target_distance":distance,"nearby_allies":ally_count,"nearby_enemies":enemy_count,"ally_min_hp":lowest,"hexagon_alive":has_hex,"skill_ready":skill_left<=0 and stun_left<=0,"target_visible":visible,"target_cluster":cluster,"scan_ready":unit_type=="hexagon" and scan_left<=0 and stun_left<=0,"in_nebula":not nebula_ids.is_empty(),"portal_ready":teleport_cooldown<=0,"reactor_warning":is_instance_valid(arena.terrain) and arena.terrain.warning_at(self),"portal_available":is_instance_valid(arena.terrain) and arena.terrain.portal_available(self),"gate_open":is_instance_valid(arena.terrain) and arena.terrain.any_gate_open(),"portal_used":portal_used_count>0,"flux_collected":flux_collected_count>0}
 
 func automatic_skill() -> bool:
+ if authority_state == ControlAuthority.MANUAL_OVERRIDE:
+  action_blocked = "手动接管中"
+  return false
  if is_plan_controlled():
   if execution.skill_policy == "hold" or skill_active: return false
   if execution.skill_policy == "travel":
@@ -313,6 +499,31 @@ func evaluate_best_target() -> void:
   current_target = arena.base_for(1-team)
 
 func movement_velocity(delta: float) -> Vector2:
+ if authority_state == ControlAuthority.MANUAL_OVERRIDE:
+  var manual_direction: Vector2 = Vector2.ZERO
+  if manual_mode == "orbit":
+   hold_orbit_phase = fmod(hold_orbit_phase + delta * 1.6, TAU)
+   var orbit_radius: float = 42.0 + unit_radius * 1.5
+   var orbit_point: Vector2 = hold_orbit_center + Vector2.RIGHT.rotated(hold_orbit_phase + float(spawn_index) * 0.8) * orbit_radius
+   manual_direction = arena.routed_direction(self,orbit_point,"manual_orbit")
+  elif is_instance_valid(manual_attack_target) and not bool(manual_attack_target.get("dead")):
+   var target_distance: float = global_position.distance_to(manual_attack_target.global_position)
+   var stop_range: float = attack_range * 0.82 + (58.0 if manual_attack_target is CoreMatrixBase else 0.0)
+   if target_distance > stop_range:
+    manual_direction = arena.routed_direction(self,manual_attack_target.global_position,"manual_attack:"+str(manual_attack_target.get_instance_id()))
+  elif manual_move_target.is_finite() and global_position.distance_to(manual_move_target) > 24.0:
+   manual_direction = arena.routed_direction(self,manual_move_target,"manual_move")
+  return whisker_steering(manual_direction) * move_speed * terrain_multiplier(manual_direction) * (1.6 if overclock_left > 0.0 else 1.0)
+ if authority_state == ControlAuthority.SQUAD_AI_SCOPED and not tactical_waypoints.is_empty():
+  while tactical_waypoint_index < tactical_waypoints.size() and global_position.distance_to(tactical_waypoints[tactical_waypoint_index]) <= 28.0:
+   tactical_waypoint_index += 1
+  if tactical_waypoint_index < tactical_waypoints.size():
+   var waypoint: Vector2 = tactical_waypoints[tactical_waypoint_index]
+   var waypoint_direction: Vector2 = arena.routed_direction(self,waypoint,"squad_path")
+   return whisker_steering(waypoint_direction) * move_speed * terrain_multiplier(waypoint_direction) * (1.6 if overclock_left > 0.0 else 1.0)
+  tactical_waypoints.clear()
+  tactical_waypoint_index = 0
+  if execution != null: execution.status = ""
  if is_plan_controlled():
   var planned: Vector2 = execution.movement(self)
   # Direction segments never invoke steering or inherit the old pursuit velocity.
@@ -409,7 +620,11 @@ func movement_velocity(delta: float) -> Vector2:
  return active_velocity.lerp(desired * speed, minf(1.0, delta * 10.0))
 
 func tick_unit(_delta: float) -> void:
- if not scripted_control: basic_attack()
+ if scripted_control:
+  return
+ if handle_manual_tick():
+  return
+ basic_attack()
 
 func basic_attack() -> void:
  if is_plan_controlled() and not execution.allow_attack: return
@@ -545,6 +760,23 @@ func _draw() -> void:
   draw_rect(Rect2(-width*0.5,-unit_radius-25.0,width,18.0),Color(0.015,0.03,0.05,0.92),true)
   draw_rect(Rect2(-width*0.5,-unit_radius-25.0,width,18.0),faction_color, false,1.0)
   draw_string(font,Vector2(-width*0.5+5.0,-unit_radius-11.0),title,HORIZONTAL_ALIGNMENT_LEFT,width-10.0,GameSettings.font_px(11),Color.WHITE)
+  var bracket_color: Color = Color(0.55,1.3,1.8,0.95)
+  var bracket: float = unit_radius + 8.0
+  var corner: float = 7.0
+  for side: int in [-1,1]:
+   draw_line(Vector2(-bracket,side*bracket),Vector2(-bracket+corner,side*bracket),bracket_color,2.0,true)
+   draw_line(Vector2(bracket,side*bracket),Vector2(bracket-corner,side*bracket),bracket_color,2.0,true)
+   draw_line(Vector2(side*bracket,-bracket),Vector2(side*bracket,-bracket+corner),bracket_color,2.0,true)
+   draw_line(Vector2(side*bracket,bracket),Vector2(side*bracket,bracket-corner),bracket_color,2.0,true)
+  for index: int in range(3):
+   var pip_color: Color = ProceduralGeo.GOLD if skill_left <= skill_cd * (float(index+1)/3.0) else Color(0.25,0.35,0.4,0.8)
+   draw_circle(Vector2(unit_radius+4.0+index*5.0,-unit_radius-3.0),1.7,pip_color)
+ if authority_state == ControlAuthority.SQUAD_AI_SCOPED:
+  draw_arc(Vector2.ZERO,unit_radius+11.0,0,TAU,28,Color(1.0,0.35,1.5,0.75),1.5,true)
+ if authority_state == ControlAuthority.MANUAL_OVERRIDE:
+  var manual_point: Vector2 = manual_move_target if manual_move_target.is_finite() else manual_attack_target.global_position if is_instance_valid(manual_attack_target) else global_position
+  if manual_point != global_position:
+   draw_line(Vector2.ZERO,to_local(manual_point),Color(0.3,1.3,0.5,0.75),2.0,true)
  if not slow_sources.is_empty():
   draw_arc(Vector2.ZERO,unit_radius+7.0,0,TAU,24,Color(1.8,0.9,0.1),2.0,true)
  if stun_left > 0.0:

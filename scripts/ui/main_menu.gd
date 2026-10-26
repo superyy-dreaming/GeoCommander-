@@ -103,6 +103,7 @@ func build_home() -> void:
   CommanderTheme.font(entry,24)
   entry.custom_minimum_size.y = 62
   navigation.add_child(entry)
+ navigation.add_child(button("按键设置",open_keybinds))
  var training: Button = button("兵种演练",open_academy)
  training.tooltip_text = "查看五兵种档案，体验真实普攻与技能"
  navigation.add_child(training)
@@ -216,6 +217,11 @@ func open_settings() -> void:
  settings = SettingsPanel.new()
  add_child(settings)
  settings.open_panel()
+
+func open_keybinds() -> void:
+ var modal: Node = load("res://scripts/ui/keybind_settings_modal.gd").new()
+ add_child(modal)
+ modal.call("open_modal")
 
 func settings_updated() -> void:
  CommanderTheme.refresh(ui)

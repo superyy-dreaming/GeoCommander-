@@ -12,6 +12,7 @@ MatchSession="*res://scripts/core/match_session.gd"
 LLMService="*res://scripts/core/llm_service.gd"
 LaboratoryStore="*res://scripts/lab/laboratory_store.gd"
 SignalBus="*res://scripts/core/signal_bus.gd"
+KeybindManager="*res://scripts/core/keybind_manager.gd"
 TacticalBrain="*res://scripts/core/tactical_brain.gd"
 
 [display]

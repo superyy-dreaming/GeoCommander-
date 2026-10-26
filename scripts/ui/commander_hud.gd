@@ -21,6 +21,7 @@ var message_label: Label
 var prompt_input: LineEdit
 var override_button: Button
 var cooldown_bar: ProgressBar
+var terminal_scope_label: Label
 var unit_buttons: Array[UnitDeployButton] = []
 var skill_buttons: Dictionary = {}
 var skill_bars: Dictionary = {}
@@ -59,6 +60,19 @@ var tool_pages: Array[ScrollContainer] = []
 var tool_panels: Array[PanelContainer] = []
 var top_frame: PanelContainer
 var brand_label: Label
+var squad_skill_row: HBoxContainer
+var squad_skill_buttons: Dictionary = {}
+var squad_skill_bars: Dictionary = {}
+var copilot_panel: PanelContainer
+var copilot_diagnosis: Label
+var copilot_status: Label
+var copilot_cards: Array[Button] = []
+var copilot_cards_scroll: ScrollContainer
+var copilot_proposals_by_slot: Dictionary = {}
+var copilot_auto_button: Button
+var copilot_auto_progress: ProgressBar
+var copilot_auto_progress_label: Label
+var copilot_restore_button: Button
 
 func _ready() -> void:
  layer = 10
@@ -76,6 +90,9 @@ func _ready() -> void:
  build_return_dialog()
  SignalBus.tactical_profile_updated.connect(_tactic_updated)
  SignalBus.match_ended.connect(_match_ended)
+ SignalBus.copilot_proposals_updated.connect(_copilot_proposals_updated)
+ SignalBus.copilot_status_changed.connect(_copilot_status_changed)
+ SignalBus.keybinds_updated.connect(_keybinds_updated)
  _tactic_updated(0, TacticalBrain.team_profiles[0], "默认均衡战术")
  GameSettings.settings_changed.connect(settings_updated)
  settings_updated()
@@ -184,9 +201,10 @@ func build_top() -> void:
  red.add_child(flux_label)
  var actions: HFlowContainer = HFlowContainer.new()
  actions_layout = actions
- actions.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
- actions.offset_left = -800
- actions.offset_right = -24
+ actions.resized.connect(layout_copilot)
+ actions.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+ actions.offset_left = 24
+ actions.offset_right = 800
  actions.offset_top = 136
  root.add_child(actions)
  start_button = button("开始对局",arena.start_match)
@@ -195,6 +213,121 @@ func build_top() -> void:
  actions.add_child(matrix_button)
  actions.add_child(button("返回主菜单",request_menu_exit))
  actions.add_child(button("设置",open_settings))
+ actions.add_child(button("按键",open_keybinds))
+ build_copilot_panel()
+
+func build_copilot_panel() -> void:
+ copilot_panel = panel(root)
+ copilot_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+ copilot_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+ copilot_panel.mouse_force_pass_scroll_events = false
+ copilot_panel.clip_contents = true
+ copilot_panel.add_theme_stylebox_override("panel",box(Color(0.018,0.045,0.07,0.84),Color(0.35,0.85,1.0,0.7),1))
+ var padding: MarginContainer = margin(copilot_panel,10)
+ var column: VBoxContainer = VBoxContainer.new()
+ column.add_theme_constant_override("separation",6)
+ padding.add_child(column)
+ var heading: HBoxContainer = HBoxContainer.new()
+ column.add_child(heading)
+ var title: Label = label("AI 参谋研判",17,ProceduralGeo.GOLD)
+ title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ title.clip_text = true
+ heading.add_child(title)
+ copilot_auto_button = button("自动代理 ["+KeybindManager.get_key_label("copilot_toggle_auto")+"] OFF",func() -> void:
+  arena.copilot.call("toggle_auto_delegate"))
+ copilot_auto_button.custom_minimum_size.x = 148
+ copilot_auto_button.size_flags_horizontal = Control.SIZE_SHRINK_END
+ CommanderTheme.font(copilot_auto_button,13)
+ heading.add_child(copilot_auto_button)
+ copilot_cards_scroll = ScrollContainer.new()
+ copilot_cards_scroll.name = "CopilotCardsScroll"
+ copilot_cards_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+ copilot_cards_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ copilot_cards_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+ copilot_cards_scroll.mouse_force_pass_scroll_events = false
+ copilot_cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+ copilot_cards_scroll.clip_contents = true
+ column.add_child(copilot_cards_scroll)
+ var cards: VBoxContainer = VBoxContainer.new()
+ cards.name = "CopilotCards"
+ cards.add_theme_constant_override("separation",6)
+ cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ var scroll_content: VBoxContainer = VBoxContainer.new()
+ scroll_content.add_theme_constant_override("separation",6)
+ scroll_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ copilot_cards_scroll.add_child(scroll_content)
+ scroll_content.add_child(cards)
+ for slot: int in range(3):
+  var card: Button = button("[%s] 等待建议" % [KeybindManager.get_key_label(["copilot_opt_1","copilot_opt_2","copilot_opt_3"][slot])],func() -> void:
+   if is_instance_valid(arena.copilot): arena.copilot.call("accept_proposal",slot))
+  card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+  card.custom_minimum_size.y = 82
+  card.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+  card.alignment = HORIZONTAL_ALIGNMENT_LEFT
+  CommanderTheme.font(card,13)
+  cards.add_child(card)
+  copilot_cards.append(card)
+ copilot_diagnosis = label("等待战场快照",14,MUTED)
+ copilot_diagnosis.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+ copilot_diagnosis.custom_minimum_size.y = 30
+ scroll_content.add_child(copilot_diagnosis)
+ var auto_row: HBoxContainer = HBoxContainer.new()
+ auto_row.add_theme_constant_override("separation",8)
+ scroll_content.add_child(auto_row)
+ copilot_auto_progress_label = label("自动采纳待机",13,MUTED)
+ copilot_auto_progress_label.custom_minimum_size.x = 112
+ auto_row.add_child(copilot_auto_progress_label)
+ copilot_auto_progress = bar(ProceduralGeo.GOLD,5)
+ copilot_auto_progress.max_value = 1.2
+ copilot_auto_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ copilot_auto_progress.visible = false
+ auto_row.add_child(copilot_auto_progress)
+ var prompt_button: Button = button("参谋提示词",open_copilot_prompt)
+ prompt_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ CommanderTheme.font(prompt_button,14)
+ scroll_content.add_child(prompt_button)
+ var status_row: HBoxContainer = HBoxContainer.new()
+ status_row.add_theme_constant_override("separation",6)
+ scroll_content.add_child(status_row)
+ copilot_status = label("建议默认关闭自动代理",13,MUTED)
+ copilot_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ copilot_status.clip_text = true
+ status_row.add_child(copilot_status)
+ copilot_restore_button = button("恢复原方案",func() -> void:
+  if is_instance_valid(arena.copilot): arena.copilot.call("restore_original"))
+ copilot_restore_button.custom_minimum_size.x = 100
+ copilot_restore_button.visible = false
+ status_row.add_child(copilot_restore_button)
+
+func open_copilot_prompt() -> void:
+ var dialog: ConfirmationDialog = ConfirmationDialog.new()
+ dialog.add_to_group("gameplay_input_blocker")
+ dialog.title = "参谋提示词设置"
+ dialog.ok_button_text = "保存"
+ dialog.cancel_button_text = "取消"
+ dialog.min_size = Vector2(620,360)
+ var column: VBoxContainer = VBoxContainer.new()
+ var editor: TextEdit = TextEdit.new()
+ editor.text = TacticalBrain.copilot_system_directive
+ editor.custom_minimum_size = Vector2(580,220)
+ editor.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+ CommanderTheme.font(editor,16)
+ column.add_child(editor)
+ var presets: HFlowContainer = HFlowContainer.new()
+ for preset_name: String in TacticalBrain.copilot_presets():
+  var preset_button: Button = button(preset_name,func() -> void: editor.text = TacticalBrain.copilot_presets()[preset_name])
+  preset_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+  presets.add_child(preset_button)
+ column.add_child(presets)
+ dialog.add_child(column)
+ dialog.confirmed.connect(func() -> void:
+  var previous_directive: String = TacticalBrain.copilot_system_directive
+  var result: Dictionary = TacticalBrain.save_copilot_directive(editor.text)
+  if TacticalBrain.copilot_system_directive != previous_directive and is_instance_valid(arena.copilot):
+   arena.copilot.call("on_directive_updated")
+  show_message(String(result.get("message","参谋提示词已保存")) if not bool(result.get("ok",false)) else "参谋提示词已保存",not bool(result.get("ok",false))))
+ add_child(dialog)
+ dialog.popup_centered()
 
 func build_bottom() -> void:
  var bottom: HBoxContainer = HBoxContainer.new()
@@ -225,6 +358,7 @@ func build_bottom() -> void:
   var card: UnitDeployButton = UnitDeployButton.new()
   card.kind = UnitCatalog.TYPES[index]
   card.hotkey = index + 1
+  card.hotkey_label = KeybindManager.get_key_label("spawn_"+card.kind)
   card.pressed.connect(func() -> void: arena.deploy(card.kind))
   cards.add_child(card)
   unit_buttons.append(card)
@@ -235,7 +369,9 @@ func build_bottom() -> void:
  terminal.add_child(column)
  var header: HBoxContainer = HBoxContainer.new()
  column.add_child(header)
- header.add_child(label("关键词终端 · 提交替换整队",18))
+ terminal_scope_label = label("关键词终端 · 提交替换整队",18)
+ terminal_scope_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+ header.add_child(terminal_scope_label)
  link_label = label("HEX-LINK ONLINE ×1.4",16,ProceduralGeo.GOLD)
  link_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  link_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -291,6 +427,7 @@ func build_bottom() -> void:
   skill_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
   skill_bar.max_value = float(UnitCatalog.SKILLS[skill]["cd"])
   skill_bars[skill] = skill_bar
+ build_squad_skill_row()
  tool_tabs = TabContainer.new()
  root.add_child(tool_tabs)
  tool_tabs.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -312,11 +449,54 @@ func build_bottom() -> void:
  status.offset_right = -30
  status.offset_top = -274
  status.offset_bottom = -240
- message_label = label("B 蓝方  ·  R 红方  ·  ◆ 基地  ·  ◇ 能源棱镜  ·  ■ 掩体  ·  ◈ 晶簇  ·  六边形 熵减区  |  数字1-5部署  |  WASD移动",17,MUTED)
+ message_label = label("B 蓝方  ·  R 红方  ·  ◆ 基地  ·  ◇ 能源棱镜  ·  ■ 掩体  ·  ◈ 晶簇  |  "+deployment_keys_text()+"  ·  滚轮缩放  ·  中键拖动",17,MUTED)
  message_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  message_label.clip_text = true
+ message_label.text = control_help_text()
+ message_label.tooltip_text = message_label.text
  status.add_child(message_label)
  status.add_child(label("右键 / Esc 取消瞄准",16,MUTED))
+
+func build_squad_skill_row() -> void:
+ squad_skill_row = HBoxContainer.new()
+ squad_skill_row.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+ squad_skill_row.offset_left = 300
+ squad_skill_row.offset_right = -300
+ squad_skill_row.offset_top = -326
+ squad_skill_row.offset_bottom = -278
+ squad_skill_row.add_theme_constant_override("separation",6)
+ root.add_child(squad_skill_row)
+ var specs: Array[Dictionary] = [
+  {"kind":"triangle","name":"锐角穿刺","key":"skill_triangle"},
+  {"kind":"square","name":"动态棱镜","key":"skill_square"},
+  {"kind":"circle","name":"轨道坍缩","key":"skill_circle"},
+  {"kind":"diamond","name":"聚焦激光","key":"skill_diamond"},
+  {"kind":"hexagon","name":"全域共鸣","key":"skill_hexagon"}
+ ]
+ for spec: Dictionary in specs:
+  var kind: String = spec["kind"]
+  var skill_button: Button = button("",func() -> void:
+   if not is_instance_valid(arena): return
+   arena.pending_squad_skill_class = kind
+   arena.selected_skill = ""
+   arena.notify("已选择"+String(UnitCatalog.DATA[kind]["zh"])+"技能，左键战场确认，右键或 Esc 取消",false))
+  skill_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+  skill_button.custom_minimum_size.y = 46
+  CommanderTheme.font(skill_button,13)
+  skill_button.tooltip_text = "选中该兵种后点击施放"
+  squad_skill_row.add_child(skill_button)
+  squad_skill_buttons[kind] = skill_button
+  var skill_bar: ProgressBar = bar(ACCENT,3)
+  skill_bar.max_value = float(UnitCatalog.DATA[kind]["skill_cd"])
+  skill_bar.value = skill_bar.max_value
+  skill_button.add_child(skill_bar)
+  skill_bar.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+  skill_bar.offset_left = 4
+  skill_bar.offset_right = -4
+  skill_bar.offset_top = -3
+  skill_bar.offset_bottom = -1
+  skill_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+  squad_skill_bars[kind] = skill_bar
 
 func backdrop() -> ColorRect:
  var node: ColorRect = ColorRect.new()
@@ -440,6 +620,7 @@ func build_matrix() -> void:
  var footer_text: Label = label("初始 180 Flux  /  每秒 +12  /  每队 30 单位  /  对局 10 分钟",16,MUTED)
  footer_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
  footer.add_child(footer_text)
+ footer.add_child(button("参谋提示词",open_copilot_prompt))
  matrix_apply = button("应用战术并开始",apply_matrix)
  matrix_apply.custom_minimum_size.x = 260
  footer.add_child(matrix_apply)
@@ -623,6 +804,60 @@ func show_message(message: String, error: bool = false) -> void:
  message_label.add_theme_color_override("font_color",Color(1.0,0.5,0.55) if error else Color(0.6,0.92,1.0))
  message_left = 5.0
 
+func _copilot_proposals_updated(proposals: Array, source: String, _snapshot_serial: int) -> void:
+ if not is_instance_valid(copilot_diagnosis): return
+ if is_instance_valid(arena.copilot):
+  copilot_diagnosis.text = str(arena.copilot.get("diagnosis"))
+ copilot_proposals_by_slot.clear()
+ for entry: Variant in proposals:
+  if entry is Dictionary:
+   copilot_proposals_by_slot[int(entry.get("slot",-1))] = entry
+ for slot: int in range(copilot_cards.size()):
+  var card: Button = copilot_cards[slot]
+  if not copilot_proposals_by_slot.has(slot):
+   card.text = "[%s] 暂无建议" % KeybindManager.get_key_label(["copilot_opt_1","copilot_opt_2","copilot_opt_3"][slot])
+   continue
+  var proposal: Dictionary = copilot_proposals_by_slot[slot]
+  card.text = "[%s] %d%%\n%s\n%s" % [KeybindManager.get_key_label(["copilot_opt_1","copilot_opt_2","copilot_opt_3"][slot]),int(proposal["recommend_score"]),str(proposal["title"]),str(proposal["reason"])]
+ copilot_status.text = "来源："+source
+ _update_copilot_controls()
+
+func _copilot_status_changed(status: String) -> void:
+ if is_instance_valid(copilot_status): copilot_status.text = status
+ _update_copilot_controls()
+
+func _update_copilot_controls() -> void:
+ if not is_instance_valid(arena) or not is_instance_valid(arena.copilot): return
+ var request_pending: bool = bool(arena.copilot.get("request_pending"))
+ var current_revision: bool = int(arena.copilot.get("proposal_tactic_revision")) == arena.global_tactic_revision
+ var has_selection: bool = not arena.selected_units.is_empty()
+ var cooldown: float = float(arena.copilot.get("accept_left"))
+ var can_accept: bool = arena.phase == MainArena.Phase.PLAYING and not request_pending and current_revision and not has_selection and cooldown <= 0.0 and not get_tree().paused
+ for slot: int in range(copilot_cards.size()):
+  var card: Button = copilot_cards[slot]
+  var available: bool = copilot_proposals_by_slot.has(slot)
+  card.disabled = not available or not can_accept
+  if not available:
+   card.tooltip_text = "等待有效的参谋建议"
+  elif request_pending:
+   card.tooltip_text = "联网分析尚未完成，暂不采纳本批次"
+  elif not current_revision:
+   card.tooltip_text = "建议已过期，等待新的战场分析"
+  elif has_selection:
+   card.tooltip_text = "清除单位选择后可应用到全局自动单位"
+  elif cooldown > 0.0:
+   card.tooltip_text = "采纳冷却 %.1f 秒" % cooldown
+  else:
+   card.tooltip_text = "采纳该方案，仅临时作用于全局自动单位"
+ var auto_left: float = float(arena.copilot.get("auto_confirm_left"))
+ var auto_enabled: bool = bool(arena.copilot.get("auto_delegate"))
+ copilot_auto_progress.visible = auto_left > 0.0
+ copilot_auto_progress.value = 1.2 - auto_left
+ copilot_auto_progress_label.text = "%.1f 秒后采纳" % auto_left if auto_left > 0.0 else ("分析完成后计时" if request_pending and auto_enabled else ("等待新建议" if auto_enabled else "自动代理关闭"))
+ var active: bool = bool(arena.copilot.get("active_copilot"))
+ copilot_restore_button.visible = active
+ copilot_restore_button.disabled = not active
+
 func _process(delta: float) -> void:
  tick_left -= delta
  message_left -= delta
@@ -630,7 +865,8 @@ func _process(delta: float) -> void:
   tick_left = 0.1
   update_hud()
  if message_left <= 0.0 and arena.selected_skill.is_empty():
-  message_label.text = "数字 1-5 部署  |  WASD 移动  |  滚轮缩放  |  Z/X/C 指挥技能"
+  message_label.text = control_help_text()
+  message_label.tooltip_text = control_help_text()
   message_label.add_theme_color_override("font_color",MUTED)
 
 func update_hud() -> void:
@@ -649,10 +885,27 @@ func update_hud() -> void:
  start_button.visible = arena.phase == MainArena.Phase.PREPARING
  link_label.text = "链路中断，请部署六边形" if arena.communication_jammed else "HEX-LINK ONLINE ×%.1f" % arena.commander_recharge()
  link_label.add_theme_color_override("font_color",ProceduralGeo.RED if arena.communication_jammed else ProceduralGeo.GOLD)
- override_button.disabled = arena.phase == MainArena.Phase.ENDED or (arena.phase == MainArena.Phase.PLAYING and (arena.communication_jammed or arena.override_left > 0.0))
- override_button.text = "%ds" % ceili(arena.override_left / arena.commander_recharge()) if arena.override_left > 0 else "OVERRIDE"
- cooldown_bar.value = 30.0 - arena.override_left
+ var local_scope: bool = arena.phase == MainArena.Phase.PLAYING and not arena.selected_units.is_empty()
+ if local_scope:
+  terminal_scope_label.text = "局部小队模式 · 仅所选单位"
+  link_label.text = "局部指令 · 无需指挥链路"
+  link_label.add_theme_color_override("font_color",ACCENT)
+  override_button.text = "应用小队指令" if arena.local_override_left <= 0.0 else "局部 %ds" % ceili(arena.local_override_left)
+  override_button.disabled = arena.phase == MainArena.Phase.ENDED or arena.local_override_left > 0.0
+  cooldown_bar.max_value = 3.0
+  cooldown_bar.value = 3.0 - arena.local_override_left
+  prompt_input.placeholder_text = "局部指令，仅修改所选单位，如：保护六边形"
+ else:
+  terminal_scope_label.text = "关键词终端 · 提交替换整队"
+  link_label.text = "链路中断，请部署六边形" if arena.communication_jammed else "HEX-LINK ONLINE ×%.1f" % arena.commander_recharge()
+  link_label.add_theme_color_override("font_color",ProceduralGeo.RED if arena.communication_jammed else ProceduralGeo.GOLD)
+  override_button.text = "提交整队规则" if arena.override_left <= 0.0 else "共享 %ds" % ceili(arena.override_left / arena.commander_recharge())
+  override_button.disabled = arena.phase == MainArena.Phase.ENDED or (arena.phase == MainArena.Phase.PLAYING and (arena.communication_jammed or arena.override_left > 0.0))
+  cooldown_bar.max_value = 30.0
+  cooldown_bar.value = 30.0 - arena.override_left
+  prompt_input.placeholder_text = "输入整队指令，如：三角形绕后切菱形"
  for card: UnitDeployButton in unit_buttons:
+  card.hotkey_label = KeybindManager.get_key_label("spawn_"+card.kind)
   var reason: String = arena.deployment_reason(card.kind)
   card.disabled = not reason.is_empty()
   card.tooltip_text = reason if not reason.is_empty() else String(UnitCatalog.DATA[card.kind]["zh"]) + "：花费 " + str(UnitCatalog.DATA[card.kind]["cost"]) + " Flux"
@@ -662,16 +915,71 @@ func update_hud() -> void:
   var data: Dictionary = UnitCatalog.SKILLS[skill]
   var left: float = arena.skill_cooldowns[skill]
   (skill_bars[skill] as ProgressBar).value = float(data["cd"]) - left
-  skill_button.text = "%s [%s]  %s" % [data["name"],data["key"],("%ds" % ceili(left / arena.commander_recharge())) if left > 0 else ("%d F" % int(data["cost"]))]
+  var key_actions: Dictionary = {"EMP_STRIKE":"cmd_emp","OVERCLOCK":"cmd_overclock","TOPOLOGY_SWAP":"cmd_swap"}
+  skill_button.text = "%s [%s]  %s" % [data["name"],KeybindManager.get_key_label(key_actions[skill]),("%ds" % ceili(left / arena.commander_recharge())) if left > 0 else ("%d F" % int(data["cost"]))]
   var reason: String = arena.skill_reason(skill)
   skill_button.disabled = not reason.is_empty()
   skill_button.tooltip_text = reason if not reason.is_empty() else String(data["zh"]) + "：点击后选择战场位置"
   skill_button.modulate = Color(0.55,0.95,1.0) if arena.selected_skill == skill else Color.WHITE
+ var selected_count: Dictionary = {}
+ var ready_count: Dictionary = {}
+ for kind: String in UnitCatalog.TYPES:
+  selected_count[kind] = 0
+  ready_count[kind] = 0
+ for unit: BaseGeoUnit in arena.selected_units:
+  if is_instance_valid(unit):
+   selected_count[unit.unit_type] = int(selected_count[unit.unit_type])+1
+   if unit.skill_left <= 0.0 and unit.stun_left <= 0.0: ready_count[unit.unit_type] = int(ready_count[unit.unit_type])+1
+ var skill_names: Dictionary = {"triangle":"锐角穿刺","square":"动态棱镜","circle":"轨道坍缩","diamond":"聚焦激光","hexagon":"全域共鸣"}
+ for kind: String in squad_skill_buttons:
+  var squad_button: Button = squad_skill_buttons[kind]
+  var selected_total: int = int(selected_count[kind])
+  var ready_total: int = int(ready_count[kind])
+  var shape_names: Dictionary = {"triangle":"△","square":"□","circle":"○","diamond":"◇","hexagon":"⬡"}
+  squad_button.text = "%s %s [%s]  %d/%d 就绪" % [str(shape_names[kind]),skill_names[kind],KeybindManager.get_key_label("skill_"+kind),ready_total,selected_total]
+  var total_cooldown: float = float(UnitCatalog.DATA[kind]["skill_cd"])
+  var cooldown_sum: float = 0.0
+  for selected_unit: BaseGeoUnit in arena.selected_units:
+   if is_instance_valid(selected_unit) and selected_unit.unit_type == kind:
+    cooldown_sum += minf(selected_unit.skill_left,total_cooldown)
+  var average_cooldown: float = cooldown_sum / float(selected_total) if selected_total > 0 else total_cooldown
+  (squad_skill_bars[kind] as ProgressBar).max_value = total_cooldown
+  (squad_skill_bars[kind] as ProgressBar).value = total_cooldown-average_cooldown
+  squad_button.disabled = selected_total == 0 or ready_total == 0 or arena.phase != MainArena.Phase.PLAYING
+  squad_button.tooltip_text = "未选择该兵种" if selected_total == 0 else ("该兵种技能均在冷却中" if ready_total == 0 else "对所选 %s 施放，冷却状态 %d/%d 就绪" % [skill_names[kind],ready_total,selected_total])
+  squad_button.modulate = Color(0.42,0.5,0.55,0.45) if selected_total == 0 else Color.WHITE
+ if is_instance_valid(arena.copilot):
+  var auto_enabled: bool = bool(arena.copilot.get("auto_delegate"))
+  copilot_auto_button.text = "自动代理 ["+KeybindManager.get_key_label("copilot_toggle_auto")+"] "+("ON" if auto_enabled else "OFF")
+ _update_copilot_controls()
  matrix_apply.text = "应用战术并开始" if arena.phase == MainArena.Phase.PREPARING else ("共享冷却 %ds" % ceili(arena.override_left / arena.commander_recharge()) if arena.override_left > 0 else "应用战术")
  matrix_apply.disabled = arena.phase == MainArena.Phase.ENDED or (arena.phase == MainArena.Phase.PLAYING and (arena.communication_jammed or arena.override_left > 0.0))
 
 func ownership(team: int) -> String:
  return "蓝方" if team == 0 else ("红方" if team == 1 else "中立")
+
+func deployment_keys_text() -> String:
+ var values: Array[String] = []
+ for kind: String in UnitCatalog.TYPES:
+  values.append(KeybindManager.get_key_label("spawn_"+kind)+" "+str(UnitCatalog.DATA[kind]["zh"]))
+ return "部署 "+" / ".join(values)
+
+func control_help_text() -> String:
+ return deployment_keys_text()+"  |  技能 "+"/".join([KeybindManager.get_key_label("skill_triangle"),KeybindManager.get_key_label("skill_square"),KeybindManager.get_key_label("skill_circle"),KeybindManager.get_key_label("skill_diamond"),KeybindManager.get_key_label("skill_hexagon")])+"  |  全局 "+"/".join([KeybindManager.get_key_label("cmd_emp"),KeybindManager.get_key_label("cmd_overclock"),KeybindManager.get_key_label("cmd_swap")])+"  |  参谋 "+"/".join([KeybindManager.get_key_label("copilot_opt_1"),KeybindManager.get_key_label("copilot_opt_2"),KeybindManager.get_key_label("copilot_opt_3")])+"/"+KeybindManager.get_key_label("copilot_toggle_auto")+"  |  "+KeybindManager.get_key_label("squad_hold_orbit")+"驻守 / "+KeybindManager.get_key_label("squad_return_ai")+"归还  |  滚轮或触控板捏合缩放 / 中键拖动 / Shift+右键绘制航线"
+
+func _keybinds_updated(_bindings: Dictionary) -> void:
+ matrix_button.text = "战术矩阵 ["+KeybindManager.get_key_label("toggle_tactical_drawer")+"]"
+ if message_left <= 0.0 and arena.selected_skill.is_empty():
+  message_label.text = control_help_text()
+  message_label.tooltip_text = message_label.text
+ for card: UnitDeployButton in unit_buttons:
+  card.hotkey_label = KeybindManager.get_key_label("spawn_"+card.kind)
+  card.update_metrics()
+ update_hud()
+
+func _exit_tree() -> void:
+ if is_instance_valid(SignalBus) and SignalBus.keybinds_updated.is_connected(_keybinds_updated):
+  SignalBus.keybinds_updated.disconnect(_keybinds_updated)
 
 func collect_focusable(node: Node, controls: Array[Control]) -> void:
  if node is Control:
@@ -694,10 +1002,12 @@ func cycle_modal_focus(modal: Control, backwards: bool) -> void:
 
 func _input(event: InputEvent) -> void:
  if is_instance_valid(settings) or (is_instance_valid(return_dialog) and return_dialog.visible): return
+ if KeybindManager.focus_is_modal(): return
  if not event is InputEventKey or not event.is_pressed() or event.is_echo():
   return
  var key_event: InputEventKey = event as InputEventKey
  var key: int = key_event.physical_keycode if key_event.physical_keycode != 0 else key_event.keycode
+ var drawer_key: int = int(KeybindManager.key_for("toggle_tactical_drawer"))
  var focus: Control = get_viewport().gui_get_focus_owner()
  if key == KEY_ESCAPE:
   if focus is LineEdit or focus is TextEdit:
@@ -706,7 +1016,10 @@ func _input(event: InputEvent) -> void:
    close_matrix()
   arena.selected_skill = ""
   get_viewport().set_input_as_handled()
- elif key == KEY_TAB:
+ elif matrix_open and key == KEY_TAB:
+  cycle_modal_focus(matrix_backdrop,key_event.shift_pressed)
+  get_viewport().set_input_as_handled()
+ elif key == drawer_key:
   if end_backdrop.visible:
    cycle_modal_focus(end_backdrop,key_event.shift_pressed)
   elif matrix_open:
@@ -724,6 +1037,11 @@ func open_settings() -> void:
  add_child(settings)
  settings.open_panel()
 
+func open_keybinds() -> void:
+ var modal: Node = load("res://scripts/ui/keybind_settings_modal.gd").new()
+ add_child(modal)
+ modal.call("open_modal")
+
 func settings_updated() -> void:
  CommanderTheme.refresh(root)
  var factor: float = float(GameSettings.values["font_scale"])
@@ -731,6 +1049,7 @@ func settings_updated() -> void:
  status_layout.offset_top = bottom_layout.offset_top-42
  status_layout.offset_bottom = bottom_layout.offset_top-8
  for card: UnitDeployButton in unit_buttons: card.update_metrics()
+ for card: Button in copilot_cards: card.custom_minimum_size.y = maxf(82.0,68.0*factor)
  update_hud()
  layout_tools.call_deferred()
  if is_instance_valid(matrix_frame):
@@ -759,3 +1078,27 @@ func layout_header() -> void:
  if not is_instance_valid(actions_layout): return
  brand_label.visible = root.size.x>=1600 or float(GameSettings.values["font_scale"])<=1.15
  actions_layout.offset_top = top_frame.offset_top+top_frame.size.y+8
+ var adviser_width: float = copilot_width()
+ actions_layout.offset_right = maxf(actions_layout.offset_left+320.0,root.size.x-adviser_width-48.0)
+ layout_copilot()
+
+func copilot_width() -> float:
+ return minf(460.0,maxf(380.0,root.size.x*0.27))
+
+func layout_copilot() -> void:
+ if not is_instance_valid(copilot_panel) or not is_instance_valid(actions_layout): return
+ var width: float = copilot_width()
+ var top: float = maxf(132.0,top_frame.get_global_rect().end.y+8.0)
+ var lower_edge: float = root.size.y-24.0
+ if is_instance_valid(squad_skill_row) and squad_skill_row.visible:
+  lower_edge = minf(lower_edge,squad_skill_row.get_global_rect().position.y-10.0)
+ if is_instance_valid(status_layout) and status_layout.visible:
+  lower_edge = minf(lower_edge,status_layout.get_global_rect().position.y-10.0)
+ if is_instance_valid(tool_tabs) and tool_tabs.visible:
+  lower_edge = minf(lower_edge,tool_tabs.get_global_rect().position.y-10.0)
+ elif is_instance_valid(bottom_layout) and bottom_layout.visible:
+  lower_edge = minf(lower_edge,bottom_layout.get_global_rect().position.y-10.0)
+ copilot_panel.offset_left = -width-24.0
+ copilot_panel.offset_right = -24.0
+ copilot_panel.offset_top = top
+ copilot_panel.offset_bottom = maxf(top+32.0,lower_edge)

@@ -18,6 +18,8 @@ func tick_unit(delta: float) -> void:
    fire_beam(global_position.direction_to(aim_point))
    skill_finished()
   return
+ if handle_manual_tick():
+  return
  if not scripted_control:
   basic_attack()
   automatic_skill()

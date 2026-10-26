@@ -27,6 +27,20 @@ var background_material: ShaderMaterial
 var winner_team: int = -2
 var end_reason: String = ""
 var elapsed: float = 0.0
+var selected_units: Array[BaseGeoUnit] = []
+var selection_active: bool = false
+var selection_start: Vector2 = Vector2.ZERO
+var selection_current: Vector2 = Vector2.ZERO
+var selection_screen_start: Vector2 = Vector2.ZERO
+var selection_double_click: bool = false
+var tactical_draw_active: bool = false
+var tactical_draw_points: Array[Vector2] = []
+var tactical_draw_last: Vector2 = Vector2.INF
+var pending_squad_skill_class: String = ""
+var local_override_left: float = 0.0
+var global_tactic_revision: int = 0
+var copilot: Node
+var last_prism_owners: Array[int] = [-2,-2]
 
 func _ready() -> void:
  process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -40,6 +54,7 @@ func _ready() -> void:
  build_bounds()
  unit_added.connect(func(unit: BaseGeoUnit) -> void:
   _unit_spawned(unit)
+  if unit.team == 1 and is_instance_valid(copilot): copilot.call("on_enemy_unit_spawned",unit)
   SignalBus.unit_spawned.emit(unit))
  unit_removed.connect(func(unit: BaseGeoUnit) -> void:
   _unit_died(unit,unit.team,unit.global_position)
@@ -51,6 +66,15 @@ func _ready() -> void:
   navigation.arena = self
   add_child(navigation)
   navigation.build(map_id)
+  if is_instance_valid(terrain):
+   terrain.terrain_event.connect(func(_unit: BaseGeoUnit, event_name: String, _object_id: String) -> void:
+    if event_name in ["reactor_warning","reactor_detonated"] and is_instance_valid(copilot): copilot.call("request_major_event",event_name))
+ copilot = load("res://scripts/core/ai_copilot_analyst.gd").new() as Node
+ copilot.name = "AICopilotAnalyst"
+ add_child(copilot)
+ copilot.setup(self)
+ base_damage_reported.connect(func(_base: CoreMatrixBase, _amount: float, _attacker: Node2D) -> void:
+  if is_instance_valid(copilot): copilot.request_major_event("基地受袭"))
  SignalBus.commander_skill_requested.connect(select_skill)
  for team: int in range(2):
   var base: CoreMatrixBase = CoreMatrixBase.new()
@@ -126,9 +150,16 @@ func _physics_process(delta: float) -> void:
   queue_redraw()
   return
  elapsed += delta
+ local_override_left = maxf(0.0, local_override_left - delta)
+ _update_manual_authority(delta)
  match_left = maxf(0.0, match_left - delta)
  for team: int in range(2):
   flux[team] += income(team) * delta
+ for index: int in range(prisms.size()):
+  var owner: int = prisms[index].capture_owner
+  if last_prism_owners[index] == 0 and owner != 0 and is_instance_valid(copilot):
+   copilot.call("request_major_event","蓝方失去能源棱镜")
+  last_prism_owners[index] = owner
  var recharge: float = commander_recharge()
  override_left = maxf(0.0, override_left - delta * recharge)
  for skill: String in skill_cooldowns:
@@ -230,6 +261,9 @@ func _unit_spawned(_unit: CharacterBody2D) -> void:
  refresh_hex_counts()
 
 func _unit_died(_unit: CharacterBody2D, _team: int, _position: Vector2) -> void:
+ if _unit is BaseGeoUnit and selected_units.has(_unit):
+  selected_units.erase(_unit)
+  SignalBus.selection_changed.emit(selected_units.duplicate())
  refresh_hex_counts()
 
 func refresh_hex_counts() -> void:
@@ -253,6 +287,8 @@ func refresh_hex_counts() -> void:
 func submit_tactic(prompt_text: String, overrides: Dictionary = {}, compiled: Dictionary = {}) -> Dictionary:
  if phase == Phase.ENDED:
   return tactic_error("对局已结束")
+ if phase == Phase.PLAYING and not selected_units.is_empty():
+  return submit_squad_tactic(prompt_text)
  if phase == Phase.PLAYING:
   if communication_jammed:
    return tactic_error("链路中断，请先部署六边形")
@@ -266,6 +302,8 @@ func submit_tactic(prompt_text: String, overrides: Dictionary = {}, compiled: Di
   if UnitCatalog.TYPES.has(kind):
    profile["unit_rules"][kind]["retreat_hp"] = clampf(float(overrides[kind]), 0.0, 0.9)
    if profile["unit_rules"][kind].has("program"): profile["unit_rules"][kind]["program"]["base"]["retreat_hp"] = profile["unit_rules"][kind]["retreat_hp"]
+ restore_copilot_profile()
+ global_tactic_revision += 1
  TacticalBrain.team_profiles[0] = profile.duplicate(true)
  TacticalBrain.last_prompts[0] = prompt_text
  SignalBus.tactical_profile_updated.emit(0, TacticalBrain.team_profiles[0], prompt_text)
@@ -273,6 +311,57 @@ func submit_tactic(prompt_text: String, overrides: Dictionary = {}, compiled: Di
   override_left = 30.0
  notify("战术已生效：" + prompt_text, false)
  return {"ok": true, "profile": profile}
+
+func apply_copilot_proposal(profile: Dictionary) -> bool:
+ if phase != Phase.PLAYING or not profile.has("unit_rules"):
+  return false
+ restore_copilot_profile()
+ var applied: int = 0
+ for unit: BaseGeoUnit in units_for(0):
+  if unit.authority_state != BaseGeoUnit.ControlAuthority.AUTO_AGENT: continue
+  var rule_patch: Variant = profile["unit_rules"].get(unit.unit_type)
+  if rule_patch is Dictionary:
+   var scoped_rule: Dictionary = rule_patch.duplicate(true)
+   scoped_rule["lane_mode"] = profile.get("lane_mode","auto")
+   scoped_rule["stance"] = profile.get("stance","balanced")
+   unit.apply_copilot_rule(scoped_rule)
+   applied += 1
+ if applied == 0:
+  notify("没有可接收参谋建议的全局自动单位",true)
+  return false
+ notify("参谋建议已临时接管 %d 个自动单位，可恢复原方案" % applied,false)
+ return true
+
+func restore_copilot_profile() -> void:
+ for unit: BaseGeoUnit in units_for(0):
+  if unit.copilot_active: unit.restore_copilot_rule()
+
+func submit_squad_tactic(prompt_text: String) -> Dictionary:
+ if phase == Phase.ENDED:
+  return tactic_error("对局已结束")
+ if phase != Phase.PLAYING:
+  return tactic_error("请先开始对局")
+ if local_override_left > 0.0:
+  return tactic_error("小队指令冷却中：%d 秒" % ceili(local_override_left))
+ var result: Dictionary = TacticalBrain.parse_prompt(prompt_text)
+ if not bool(result.get("ok",false)):
+  return tactic_error(String(result.get("message","小队指令无法编译")))
+ var profile: Dictionary = result["profile"]
+ var applied: int = 0
+ for unit: BaseGeoUnit in selected_units:
+  if not is_instance_valid(unit) or unit.dead or unit.team != 0:
+   continue
+  var unit_rule: Dictionary = (profile["unit_rules"].get(unit.unit_type,{}) as Dictionary).duplicate(true)
+  unit_rule["lane_mode"] = profile.get("lane_mode","auto")
+  unit_rule["stance"] = profile.get("stance","balanced")
+  unit.set_squad_rule(unit_rule)
+  applied += 1
+ if applied == 0:
+  return tactic_error("没有可接收小队指令的存活蓝方单位")
+ local_override_left = 3.0
+ SignalBus.squad_command_reported.emit("小队指令已应用：%d 个单位" % applied,true)
+ notify("小队指令已应用，仅作用于已选择的 %d 个单位" % applied,false)
+ return {"ok":true,"applied":applied,"profile":profile}
 
 func tactic_error(message: String) -> Dictionary:
  notify(message, true)
@@ -457,6 +546,7 @@ func finish_match(winner: int, reason: String) -> void:
  winner_team = winner
  end_reason = reason
  selected_skill = ""
+ if is_instance_valid(copilot): copilot.call("stop_for_match_end")
  SignalBus.match_ended.emit(winner, reason)
  notify("对局结束：" + reason, false)
 
@@ -479,34 +569,366 @@ func _settings_updated() -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
  if not event is InputEventKey or not event.is_pressed() or event.is_echo():
   return
- var focus: Control = get_viewport().gui_get_focus_owner()
- if focus is LineEdit or focus is TextEdit:
+ if not KeybindManager.gameplay_input_allowed() or bool(hud.get("matrix_open")):
   return
- if bool(hud.get("matrix_open")):
-  return
- var key: int = (event as InputEventKey).physical_keycode
- if key >= KEY_1 and key <= KEY_5:
-  deploy(UnitCatalog.TYPES[key - KEY_1])
- elif key in [KEY_Z, KEY_X, KEY_C]:
-  select_skill(["EMP_STRIKE", "OVERCLOCK", "TOPOLOGY_SWAP"][[KEY_Z, KEY_X, KEY_C].find(key)])
- elif key == KEY_ESCAPE:
+ var key_event: InputEventKey = event as InputEventKey
+ if KeybindManager.action_matches(key_event,"spawn_triangle"):
+  deploy("triangle")
+ elif KeybindManager.action_matches(key_event,"spawn_square"):
+  deploy("square")
+ elif KeybindManager.action_matches(key_event,"spawn_circle"):
+  deploy("circle")
+ elif KeybindManager.action_matches(key_event,"spawn_diamond"):
+  deploy("diamond")
+ elif KeybindManager.action_matches(key_event,"spawn_hexagon"):
+  deploy("hexagon")
+ elif KeybindManager.action_matches(key_event,"cmd_emp"):
+  select_skill("EMP_STRIKE")
+ elif KeybindManager.action_matches(key_event,"cmd_overclock"):
+  select_skill("OVERCLOCK")
+ elif KeybindManager.action_matches(key_event,"cmd_swap"):
+  select_skill("TOPOLOGY_SWAP")
+ elif KeybindManager.action_matches(key_event,"copilot_opt_1"):
+  if is_instance_valid(copilot): copilot.accept_proposal(0)
+ elif KeybindManager.action_matches(key_event,"copilot_opt_2"):
+  if is_instance_valid(copilot): copilot.accept_proposal(1)
+ elif KeybindManager.action_matches(key_event,"copilot_opt_3"):
+  if is_instance_valid(copilot): copilot.accept_proposal(2)
+ elif KeybindManager.action_matches(key_event,"copilot_toggle_auto"):
+  if is_instance_valid(copilot): copilot.toggle_auto_delegate()
+ elif KeybindManager.action_matches(key_event,"skill_triangle"):
+  cast_selected_class_skill("triangle",get_global_mouse_position())
+ elif KeybindManager.action_matches(key_event,"skill_square"):
+  cast_selected_class_skill("square",get_global_mouse_position())
+ elif KeybindManager.action_matches(key_event,"skill_circle"):
+  cast_selected_class_skill("circle",get_global_mouse_position())
+ elif KeybindManager.action_matches(key_event,"skill_diamond"):
+  cast_selected_class_skill("diamond",get_global_mouse_position())
+ elif KeybindManager.action_matches(key_event,"skill_hexagon"):
+  cast_selected_class_skill("hexagon",get_global_mouse_position())
+ elif KeybindManager.action_matches(key_event,"squad_hold_orbit"):
+  for unit: BaseGeoUnit in selected_units:
+   if is_instance_valid(unit): unit.set_hold_orbit()
+  notify("已命令所选单位驻守环绕",false)
+ elif KeybindManager.action_matches(key_event,"squad_return_ai"):
+  for unit: BaseGeoUnit in selected_units:
+   if is_instance_valid(unit): unit.return_to_ai()
+  notify("所选单位已归还 AI 托管",false)
+ elif KeybindManager.action_matches(key_event,"toggle_tactical_drawer"):
+  hud.call("toggle_matrix")
+ elif key_event.keycode == KEY_ESCAPE:
+  var was_aiming: bool = not selected_skill.is_empty() or not pending_squad_skill_class.is_empty()
   selected_skill = ""
+  pending_squad_skill_class = ""
+  if not was_aiming and not selection_active: clear_selection()
   hud.call("close_matrix")
 
 func _unhandled_input(event: InputEvent) -> void:
- if event is InputEventMouseButton and event.is_pressed():
+ if not KeybindManager.gameplay_input_allowed() or bool(hud.get("matrix_open")):
+  return
+ if event is InputEventMouseButton:
   var button: InputEventMouseButton = event as InputEventMouseButton
-  if button.button_index == MOUSE_BUTTON_RIGHT:
-   selected_skill = ""
-  elif button.button_index == MOUSE_BUTTON_LEFT and not selected_skill.is_empty():
-   cast_skill(selected_skill, get_global_mouse_position())
+  if button.button_index == MOUSE_BUTTON_LEFT and button.pressed:
+   if not pending_squad_skill_class.is_empty():
+    cast_selected_class_skill(pending_squad_skill_class,get_global_mouse_position())
+    pending_squad_skill_class = ""
+    get_viewport().set_input_as_handled()
+    return
+   if not selected_skill.is_empty():
+    cast_skill(selected_skill,get_global_mouse_position())
+    get_viewport().set_input_as_handled()
+    return
+   selection_active = true
+   selection_start = get_global_mouse_position()
+   selection_current = selection_start
+   selection_screen_start = button.position
+   selection_double_click = button.double_click
    get_viewport().set_input_as_handled()
+  elif button.button_index == MOUSE_BUTTON_LEFT and not button.pressed and selection_active:
+   selection_current = get_global_mouse_position()
+   selection_active = false
+   if selection_screen_start.distance_to(button.position) > 6.0:
+    select_in_world_rect(Rect2(selection_start,selection_current-selection_start).abs())
+   else:
+    var clicked: BaseGeoUnit = unit_at_point(selection_current)
+    if is_instance_valid(clicked) and clicked.team == 0:
+     if selection_double_click:
+      select_same_kind(clicked.unit_type)
+     else:
+      set_selection([clicked])
+    else:
+     clear_selection()
+   get_viewport().set_input_as_handled()
+  elif button.button_index == MOUSE_BUTTON_RIGHT and button.pressed:
+   if not pending_squad_skill_class.is_empty() or not selected_skill.is_empty():
+    pending_squad_skill_class = ""
+    selected_skill = ""
+    get_viewport().set_input_as_handled()
+    return
+   if button.shift_pressed:
+    tactical_draw_active = true
+    tactical_draw_points = [get_global_mouse_position()]
+    tactical_draw_last = tactical_draw_points[0]
+   elif not selected_units.is_empty():
+    issue_right_click_order(get_global_mouse_position())
+   get_viewport().set_input_as_handled()
+  elif button.button_index == MOUSE_BUTTON_RIGHT and not button.pressed and tactical_draw_active:
+   tactical_draw_active = false
+   var final_point: Vector2 = get_global_mouse_position()
+   if tactical_draw_points.is_empty() or tactical_draw_points.back().distance_to(final_point)>20.0:
+    tactical_draw_points.append(final_point)
+   if tactical_draw_points.size() >= 2:
+    var path_error: String = tactical_path_error(tactical_draw_points)
+    if path_error.is_empty():
+     for unit: BaseGeoUnit in selected_units:
+      if is_instance_valid(unit): unit.set_tactical_path(tactical_draw_points)
+     notify("小队航线已下达：%d 个航点" % tactical_draw_points.size(),false)
+    else:
+     notify(path_error,true)
+   tactical_draw_points.clear()
+   get_viewport().set_input_as_handled()
+ elif event is InputEventMouseMotion:
+  var motion: InputEventMouseMotion = event as InputEventMouseMotion
+  if selection_active:
+   selection_current = get_global_mouse_position()
+   queue_redraw()
+   get_viewport().set_input_as_handled()
+  elif tactical_draw_active:
+   var point: Vector2 = get_global_mouse_position()
+   if tactical_draw_last.distance_to(point) >= 65.0:
+    tactical_draw_points.append(point)
+    tactical_draw_last = point
+   queue_redraw()
+   get_viewport().set_input_as_handled()
+
+func unit_at_point(point: Vector2) -> BaseGeoUnit:
+ var best: BaseGeoUnit = null
+ var best_distance: float = INF
+ for unit: BaseGeoUnit in units_for(0):
+  var distance: float = point.distance_to(unit.global_position)
+  if distance <= unit.unit_radius + 8.0 and distance < best_distance:
+   best = unit
+   best_distance = distance
+ return best
+
+func set_selection(units: Array[BaseGeoUnit]) -> void:
+ clear_selection()
+ for unit: BaseGeoUnit in units:
+  if is_instance_valid(unit) and not unit.dead and unit.team == 0:
+   unit.selected = true
+   selected_units.append(unit)
+ SignalBus.selection_changed.emit(selected_units.duplicate())
+ queue_redraw()
+
+func clear_selection() -> void:
+ for unit: BaseGeoUnit in selected_units:
+  if is_instance_valid(unit): unit.selected = false
+ selected_units.clear()
+ SignalBus.selection_changed.emit([])
+ queue_redraw()
+
+func select_in_world_rect(rect: Rect2) -> void:
+ var result: Array[BaseGeoUnit] = []
+ for unit: BaseGeoUnit in units_for(0):
+  if rect.has_point(unit.global_position): result.append(unit)
+ set_selection(result)
+
+func select_same_kind(kind: String) -> void:
+ var result: Array[BaseGeoUnit] = []
+ var viewport_rect: Rect2 = Rect2(Vector2.ZERO,get_viewport_rect().size)
+ for unit: BaseGeoUnit in units_for(0):
+  var screen: Vector2 = get_viewport().get_canvas_transform() * unit.global_position
+  if unit.unit_type == kind and viewport_rect.grow(20.0).has_point(screen): result.append(unit)
+ set_selection(result)
+
+func tactical_path_error(points: Array[Vector2]) -> String:
+ if points.size() < 2:
+  return "小队航线至少需要两个航点"
+ var largest_radius: float = 0.0
+ for unit: BaseGeoUnit in selected_units:
+  if is_instance_valid(unit): largest_radius = maxf(largest_radius,unit.unit_radius)
+ for index: int in range(points.size()):
+  var point: Vector2 = points[index]
+  if not WORLD_RECT.grow(-largest_radius-3.0).has_point(point):
+   return "航点 %d 超出地图边界" % (index+1)
+  if is_instance_valid(navigation):
+   for polygon: PackedVector2Array in navigation.solid_polygons:
+    if Geometry2D.is_point_in_polygon(point,polygon):
+     return "航点 %d 位于障碍物内" % (index+1)
+    for edge: int in range(polygon.size()):
+     if Geometry2D.get_closest_point_to_segment(point,polygon[edge],polygon[(edge+1)%polygon.size()]).distance_to(point) < largest_radius+3.0:
+      return "航点 %d 离障碍物过近" % (index+1)
+ return ""
+
+func issue_right_click_order(point: Vector2) -> void:
+ var clicked_enemy: BaseGeoUnit = null
+ for enemy: BaseGeoUnit in units_for(1):
+  var perceived: bool = false
+  for observer: BaseGeoUnit in selected_units:
+   if is_instance_valid(observer) and (not is_instance_valid(terrain) or terrain.can_perceive(observer,enemy)):
+    perceived = true
+    break
+  if perceived and point.distance_to(enemy.global_position) <= enemy.unit_radius + 12.0:
+   clicked_enemy = enemy
+   break
+ if is_instance_valid(clicked_enemy):
+  for unit: BaseGeoUnit in selected_units:
+   if is_instance_valid(unit): unit.set_manual_attack(clicked_enemy,6.0)
+  notify("已下达集火：红方"+String(UnitCatalog.DATA[clicked_enemy.unit_type]["zh"]),false)
+  return
+ var enemy_base: CoreMatrixBase = base_for(1)
+ if is_instance_valid(enemy_base) and point.distance_to(enemy_base.global_position) <= enemy_base.unit_radius + 24.0:
+  for unit: BaseGeoUnit in selected_units:
+   if is_instance_valid(unit): unit.set_manual_attack(enemy_base,6.0)
+  notify("已下达集火：红方基地",false)
+  return
+ var columns: int = maxi(1,ceili(sqrt(float(selected_units.size()))))
+ var formation_units: Array[BaseGeoUnit] = []
+ var destinations: Array[Vector2] = []
+ var radii: Array[float] = []
+ for index: int in range(selected_units.size()):
+  var unit: BaseGeoUnit = selected_units[index]
+  if not is_instance_valid(unit): continue
+  var offset: Vector2 = Vector2((index % columns) - (columns-1)*0.5, floori(index/columns) - (ceil(float(selected_units.size())/columns)-1)*0.5) * 65.0
+  var destination: Vector2 = _find_formation_destination(point+offset,unit.unit_radius,destinations,radii,selected_units)
+  if not destination.is_finite():
+   notify("该位置无法容纳完整编队，请选择更开阔的区域",true)
+   return
+  formation_units.append(unit)
+  destinations.append(destination)
+  radii.append(unit.unit_radius)
+ for index: int in range(formation_units.size()):
+  var unit: BaseGeoUnit = formation_units[index]
+  if is_instance_valid(unit): unit.set_manual_move(destinations[index],4.0)
+ notify("已下达编队移动：%d 个单位" % selected_units.size(),false)
+
+func _find_formation_destination(origin: Vector2, radius: float, reserved: Array[Vector2], reserved_radii: Array[float], moving_units: Array[BaseGeoUnit]) -> Vector2:
+ for attempt: int in range(72):
+  var candidate: Vector2 = origin
+  if attempt > 0:
+   var ring: float = ceil(sqrt(float(attempt)))
+   candidate += Vector2.RIGHT.rotated(float(attempt)*2.399963) * ring * 24.0
+  if not WORLD_RECT.grow(-radius-3.0).has_point(candidate): continue
+  var blocked: bool = false
+  for base: CoreMatrixBase in bases:
+   if candidate.distance_to(base.global_position) < radius+base.unit_radius+6.0:
+    blocked = true
+    break
+  if blocked: continue
+  for other: BaseGeoUnit in local_units:
+   if not is_instance_valid(other) or other.dead or moving_units.has(other): continue
+   if candidate.distance_to(other.global_position) < radius+other.unit_radius+6.0:
+    blocked = true
+    break
+  if blocked: continue
+  if is_instance_valid(navigation):
+   for polygon: PackedVector2Array in navigation.solid_polygons:
+    if Geometry2D.is_point_in_polygon(candidate,polygon):
+     blocked = true
+     break
+    for edge: int in range(polygon.size()):
+     if Geometry2D.get_closest_point_to_segment(candidate,polygon[edge],polygon[(edge+1)%polygon.size()]).distance_to(candidate) < radius+3.0:
+      blocked = true
+      break
+    if blocked: break
+  if blocked: continue
+  for index: int in range(reserved.size()):
+   if candidate.distance_to(reserved[index]) < radius+reserved_radii[index]+8.0:
+    blocked = true
+    break
+  if not blocked: return candidate
+ return Vector2.INF
+
+func _update_manual_authority(delta: float) -> void:
+ for unit: BaseGeoUnit in local_units:
+  if not is_instance_valid(unit) or unit.authority_state != BaseGeoUnit.ControlAuthority.MANUAL_OVERRIDE:
+   continue
+  if unit.manual_mode == "orbit": continue
+  var arrived: bool = unit.manual_move_target.is_finite() and unit.global_position.distance_to(unit.manual_move_target) <= 30.0
+  var target_lost: bool = false
+  var target_unseen: bool = false
+  if unit.manual_mode == "attack":
+   target_lost = not is_instance_valid(unit.manual_attack_target) or bool(unit.manual_attack_target.get("dead"))
+   if not target_lost and unit.manual_attack_target is BaseGeoUnit and is_instance_valid(terrain):
+    target_unseen = not terrain.can_perceive(unit,unit.manual_attack_target as BaseGeoUnit)
+  var wants_move: bool = false
+  var movement_goal: Vector2 = Vector2.INF
+  if unit.manual_mode == "move" and unit.manual_move_target.is_finite():
+   movement_goal = unit.manual_move_target
+   wants_move = unit.global_position.distance_to(movement_goal) > 30.0
+  elif unit.manual_mode == "attack" and not target_lost and not target_unseen and is_instance_valid(unit.manual_attack_target):
+   movement_goal = unit.manual_attack_target.global_position
+   var stop_range: float = unit.attack_range*0.82 + (58.0 if unit.manual_attack_target is CoreMatrixBase else 0.0)
+   wants_move = unit.global_position.distance_to(movement_goal) > stop_range
+  if wants_move and unit.stun_left <= 0.0:
+   unit.manual_block_sample_time += delta
+   if unit.manual_block_sample_time >= 0.5:
+    var actual_motion: float = unit.global_position.distance_to(unit.manual_block_sample_position)
+    if actual_motion < 3.0:
+     unit.manual_blocked_time += unit.manual_block_sample_time
+    else:
+     unit.manual_blocked_time = 0.0
+    unit.manual_block_sample_time = 0.0
+    unit.manual_block_sample_position = unit.global_position
+  elif not wants_move:
+   unit.manual_blocked_time = 0.0
+   unit.manual_block_sample_time = 0.0
+   unit.manual_block_sample_position = unit.global_position
+  else:
+   unit.manual_block_sample_time = 0.0
+   unit.manual_block_sample_position = unit.global_position
+  if target_lost or target_unseen:
+   unit.action_blocked = "集火目标已失去可感知，已归还 AI" if target_unseen else "集火目标已丢失，已归还 AI"
+   unit.release_manual_control()
+   continue
+  if unit.manual_blocked_time >= 1.5:
+   unit.action_blocked = "手动指令持续受阻，已归还 AI"
+   unit.release_manual_control()
+   continue
+  if unit.manual_hold_timer <= 0.0:
+   if not arrived and unit.manual_mode == "move": unit.action_blocked = "手动移动窗口结束，已归还 AI"
+   unit.release_manual_control()
+
+func cast_selected_class_skill(kind: String, point: Vector2) -> void:
+ if phase != Phase.PLAYING:
+  notify("请先开始对局",true)
+  return
+ var count: int = 0
+ for unit: BaseGeoUnit in selected_units:
+  if not is_instance_valid(unit) or unit.dead or unit.unit_type != kind: continue
+  if kind == "triangle" and not unit.target_valid():
+   var nearest: BaseGeoUnit = null
+   var distance: float = INF
+   for enemy: BaseGeoUnit in unit.enemies():
+    if point.distance_squared_to(enemy.global_position) < distance:
+     nearest = enemy
+     distance = point.distance_squared_to(enemy.global_position)
+   unit.current_target = nearest
+  var spec: Dictionary = {"aim":"point","point":[point.x,point.y],"purpose":"attack"}
+  if kind == "hexagon": spec = {"aim":"self","purpose":"support"}
+  var result: Dictionary = SkillRequest.attempt(unit,spec)
+  if bool(result.get("ok",false)): count += 1
+ if count == 0:
+  notify("没有可施放的"+String(UnitCatalog.DATA[kind]["zh"])+"技能",true)
+ else:
+  notify(String(UnitCatalog.DATA[kind]["zh"])+"技能已对 %d 个单位发出" % count,false)
 
 func _draw() -> void:
  draw_rect(WORLD_RECT, Color(0.08,0.25,0.34,0.6), false, 2.0)
  for index: int in range(1, 8):
   draw_line(Vector2(index * 300, 0), Vector2(index * 300, 14), Color(0.18,0.42,0.55), 2.0)
   draw_line(Vector2(index * 300, WORLD_RECT.size.y), Vector2(index * 300, WORLD_RECT.size.y-14), Color(0.18,0.42,0.55), 2.0)
+ if selection_active:
+  var selection_rect: Rect2 = Rect2(selection_start,selection_current-selection_start).abs()
+  draw_rect(selection_rect,Color(0.15,0.85,1.0,0.18),true)
+  draw_rect(selection_rect,Color(0.35,1.3,1.8,0.95),false,2.0,true)
+ if tactical_draw_points.size()>1:
+  draw_polyline(PackedVector2Array(tactical_draw_points),Color(1.0,1.8,2.0,0.86),4.0,true)
+ if not pending_squad_skill_class.is_empty() and phase == Phase.PLAYING:
+  var point: Vector2 = get_global_mouse_position()
+  draw_arc(point,24.0,0,TAU,32,Color(1.0,1.8,2.0,0.9),2.0,true)
+  draw_line(point+Vector2(-10,0),point+Vector2(10,0),Color(1.0,1.8,2.0),1.5)
+  draw_line(point+Vector2(0,-10),point+Vector2(0,10),Color(1.0,1.8,2.0),1.5)
  if not selected_skill.is_empty() and phase == Phase.PLAYING:
   var point: Vector2 = get_global_mouse_position()
   var radius: float = UnitCatalog.SKILLS[selected_skill]["radius"]

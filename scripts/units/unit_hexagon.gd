@@ -11,6 +11,8 @@ func _ready() -> void:
  core = ProceduralGeo.outline(visual_root, ProceduralGeo.get_regular_polygon(15.0, 6), Color(2.0, 1.6, 0.4), 1.8)
 
 func tick_unit(delta: float) -> void:
+ if handle_manual_tick():
+  return
  if not arena.reduced_motion:
   pulse_phase += delta
   core.rotation -= delta * 1.4

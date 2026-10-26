@@ -40,6 +40,8 @@ func tick_unit(delta: float) -> void:
    skill_finished()
    cancel_active_skill()
   return
+ if handle_manual_tick():
+  return
  if not scripted_control:
   basic_attack()
   automatic_skill()

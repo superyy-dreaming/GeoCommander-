@@ -98,17 +98,22 @@ func request_payload(purpose: String, prompt: String = "", kind: String = "trian
   system_parts.append("本地识别摘要（仅作解释和约束，不能替代 JSON 校验）：\n"+str(normalized["summary"])+("\n无法可靠支持："+", ".join(normalized["unsupported"]) if not normalized["unsupported"].is_empty() else ""))
   if map_id in MapCatalog.IDS: system_parts.append(MapCatalog.prompt_summary(map_id))
   messages = [{"role":"system","content":"\n\n".join(system_parts)},{"role":"user","content":"请根据系统中的专属提示词和能力约束输出严格 JSON。"}]
+ elif purpose == "copilot":
+  var copilot_system: String = "你是 GeoCommander 战中 AI 参谋。只输出严格 JSON 对象，格式为 {\"proposals\":[{\"slot\":0,\"recommend_score\":99,\"title\":\"\",\"reason\":\"\",\"profile_patch\":{}}]}。不得编造地图、单位或隐藏目标信息；profile_patch 只能使用已有战术字段。"
+  if not global_prompt.strip_edges().is_empty(): copilot_system += "\n\n用户配置的参谋系统约束：\n"+global_prompt.strip_edges()
+  messages = [{"role":"system","content":copilot_system},{"role":"user","content":prompt}]
  var payload: Dictionary = {"model":model,"messages":messages,"stream":false}
  if provider_profile() == "siliconflow_json":
   payload["enable_thinking"] = false
-  if purpose == "generate": payload["response_format"] = {"type":"json_object"}
+  if purpose in ["generate","copilot"]: payload["response_format"] = {"type":"json_object"}
  return payload
 
 func start(request_owner: int, purpose: String, prompt: String = "", kind: String = "triangle", map_id: String = "", global_prompt: String = "") -> Dictionary:
  cancel_owner(request_owner)
- if purpose not in ["models","test","generate"]: return {"ok":false,"message":"未知请求类型"}
+ if purpose not in ["models","test","generate","copilot"]: return {"ok":false,"message":"未知请求类型"}
  if purpose != "models" and model.is_empty(): return {"ok":false,"message":"请选择或手填模型 ID"}
  if purpose == "generate" and (prompt.strip_edges().is_empty() or prompt.length() > UnitTacticProgram.MAX_PROMPT): return {"ok":false,"message":"提示词需为 1 至 4096 字符"}
+ if purpose == "copilot" and (prompt.strip_edges().is_empty() or prompt.length() > 8192): return {"ok":false,"message":"参谋请求内容超出长度限制"}
  if purpose == "generate" and kind not in UnitCatalog.TYPES: return {"ok":false,"message":"无效兵种"}
  var request: HTTPRequest = HTTPRequest.new()
  # HTTPRequest remains asynchronous in its default nonblocking mode. Threaded
@@ -119,9 +124,9 @@ func start(request_owner: int, purpose: String, prompt: String = "", kind: Strin
  request.max_redirects = 0
  add_child(request)
  var stamp: int = generation
- requests[request_owner] = {"node":request,"generation":stamp,"purpose":purpose,"prompt":prompt,"started_ms":Time.get_ticks_msec(),"profile":provider_profile()}
+ requests[request_owner] = {"node":request,"generation":stamp,"purpose":purpose,"prompt":prompt,"map_id":map_id,"started_ms":Time.get_ticks_msec(),"profile":provider_profile()}
  request.request_completed.connect(func(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
-  finish(request_owner,request,stamp,purpose,kind,result,response_code,body))
+  finish(request_owner,request,stamp,purpose,kind,map_id,result,response_code,body))
  var headers: PackedStringArray = ["Content-Type: application/json"]
  if not api_key.is_empty(): headers.append("Authorization: Bearer "+api_key)
  var path: String = "/models" if purpose == "models" else "/chat/completions"
@@ -134,21 +139,21 @@ func start(request_owner: int, purpose: String, prompt: String = "", kind: Strin
   return {"ok":false,"message":"请求未发起："+error_string(error)}
  return {"ok":true,"message":"请求进行中，可取消"+("。SiliconFlow 非思考 JSON 模式" if provider_profile() == "siliconflow_json" and purpose == "generate" else "")}
 
-func finish(request_owner: int, request: HTTPRequest, stamp: int, purpose: String, kind: String, result: int, code: int, body: PackedByteArray) -> void:
+func finish(request_owner: int, request: HTTPRequest, stamp: int, purpose: String, kind: String, map_id: String, result: int, code: int, body: PackedByteArray) -> void:
  if not requests.has(request_owner) or requests[request_owner]["node"] != request or stamp != generation: return
  var elapsed_ms: int = Time.get_ticks_msec()-int(requests[request_owner]["started_ms"])
  var profile: String = requests[request_owner]["profile"]
  var original_prompt: String = str(requests[request_owner].get("prompt",""))
  requests.erase(request_owner)
  request.queue_free()
- var response: Dictionary = decode(purpose,kind,result,code,body)
+ var response: Dictionary = decode(purpose,kind,map_id,result,code,body)
  if purpose == "generate": response["intent_summary"] = TacticPlan.normalize_prompt(original_prompt)
  response["elapsed_ms"] = elapsed_ms
  response["request_profile"] = profile
  if purpose == "test": status = response["message"]
  completed.emit(request_owner,purpose,response)
 
-func decode(purpose: String, kind: String, result: int, code: int, body: PackedByteArray) -> Dictionary:
+func decode(purpose: String, kind: String, map_id: String, result: int, code: int, body: PackedByteArray) -> Dictionary:
  if result == HTTPRequest.RESULT_TIMEOUT: return {"ok":false,"category":"timeout","message":"请求超时，未收到完整响应。可显式重试，上一份有效配置保留"}
  if result != HTTPRequest.RESULT_SUCCESS: return {"ok":false,"category":"network","message":"网络、TLS、超时或响应大小检查失败（%d），可显式重试" % result}
  if code in [401,403]: return {"ok":false,"category":"authentication","message":"鉴权失败，请检查 API Key 与权限"}
@@ -167,6 +172,10 @@ func decode(purpose: String, kind: String, result: int, code: int, body: PackedB
  if not choices is Array or choices.is_empty() or not choices[0] is Dictionary or not choices[0].get("message") is Dictionary or not choices[0]["message"].get("content") is String or choices[0]["message"]["content"].strip_edges().is_empty():
   return {"ok":false,"category":"format","message":"响应缺少 choices[0].message.content 文本"}
  if purpose == "test": return {"ok":true,"category":"success","message":"连接通过：鉴权、模型、网络、响应格式均正常"}
+ if purpose == "copilot":
+  var copilot_checked: Dictionary = AICopilotAnalyst.parse_response(choices[0]["message"]["content"],map_id)
+  copilot_checked["source_model"] = model
+  return copilot_checked
  var checked: Dictionary = UnitTacticProgram.parse(choices[0]["message"]["content"],kind)
  checked["finish_reason"] = str(choices[0].get("finish_reason","unknown"))
  checked["category"] = "success" if checked["ok"] else "validation"

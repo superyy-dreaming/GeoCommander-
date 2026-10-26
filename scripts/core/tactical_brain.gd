@@ -22,10 +22,45 @@ var team_profiles: Array[Dictionary] = []
 var opening_prompt: String = "默认均衡战术"
 var opening_profile: Dictionary = {}
 var last_prompts: Array[String] = ["默认均衡战术", "默认均衡战术"]
+const COPILOT_CONFIG_PATH: String = "user://copilot.cfg"
+const COPILOT_DEFAULT: String = "均衡分析战场局势，根据敌我兵种克制、中立能源点与晶簇刷新情况，提供三套按推荐度从高到低排列的战术变阵方案。"
+var copilot_system_directive: String = COPILOT_DEFAULT
+var copilot_persistence_error: String = ""
 
 func _ready() -> void:
  opening_profile = get_default_profile()
  reset_profiles()
+ load_copilot_directive()
+
+func load_copilot_directive() -> void:
+ var config: ConfigFile = ConfigFile.new()
+ if config.load(COPILOT_CONFIG_PATH) == OK and int(config.get_value("copilot","version",0)) == 1:
+  var value: String = str(config.get_value("copilot","directive",COPILOT_DEFAULT))
+  if value.length() <= UnitTacticProgram.MAX_PROMPT and not value.strip_edges().is_empty(): copilot_system_directive = value
+
+func save_copilot_directive(value: String) -> Dictionary:
+ var trimmed: String = value.strip_edges()
+ if trimmed.is_empty() or trimmed.length() > UnitTacticProgram.MAX_PROMPT:
+  return {"ok":false,"message":"参谋提示词需为 1 至 4096 字符"}
+ copilot_system_directive = trimmed
+ var config: ConfigFile = ConfigFile.new()
+ config.set_value("copilot","version",1)
+ config.set_value("copilot","directive",copilot_system_directive)
+ var error: Error = config.save(COPILOT_CONFIG_PATH)
+ copilot_persistence_error = "" if error == OK else "本次运行已生效，但参谋提示词未保存"
+ return {"ok":error == OK,"message":copilot_persistence_error}
+
+func copilot_presets() -> Dictionary:
+ return {
+  "激进奇袭参谋": "优先推荐利用加速轨、虫洞与三角形绕后刺杀敌方六边形和抢夺晶簇的高机动进攻方案。",
+  "折光阵地参谋": "优先推荐正方形展开棱镜配合菱形折射激光、利用隐匿星云防守反击与规避狙击的方案。",
+  "经济运营参谋": "优先推荐抢占南北能源点、躲避反应堆过载并循环采集算力晶簇的资源压制方案。"
+ }
+
+func set_copilot_preset(name: String) -> Dictionary:
+ var presets: Dictionary = copilot_presets()
+ if not presets.has(name): return {"ok":false,"message":"未知参谋预设"}
+ return save_copilot_directive(str(presets[name]))
 
 func reset_profiles() -> void:
  team_profiles = [get_default_profile(), get_default_profile()]

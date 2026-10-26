@@ -109,7 +109,20 @@ func input_and_zoom() -> void:
   await frames()
   camera.call("_process",20.0)
   key(code,false)
-  check(legal_position() and not camera.position.is_equal_approx(MapCatalog.CENTER),"arrow movement clamps edge "+str(code))
+  check(legal_position() and camera.position.is_equal_approx(MapCatalog.CENTER),"方向键不再移动镜头 "+str(code))
+ var drag_start: Vector2 = camera.position
+ var middle_down: InputEventMouseButton = InputEventMouseButton.new()
+ middle_down.button_index = MOUSE_BUTTON_MIDDLE
+ middle_down.pressed = true
+ camera.call("_unhandled_input",middle_down)
+ var motion: InputEventMouseMotion = InputEventMouseMotion.new()
+ motion.relative = Vector2(180,-90)
+ camera.call("_unhandled_input",motion)
+ var middle_up: InputEventMouseButton = InputEventMouseButton.new()
+ middle_up.button_index = MOUSE_BUTTON_MIDDLE
+ middle_up.pressed = false
+ camera.call("_unhandled_input",middle_up)
+ check(legal_position() and not camera.position.is_equal_approx(drag_start),"中键拖动镜头")
  camera.position = MapCatalog.CENTER
  camera.set("target_zoom",1.0)
  camera.zoom = Vector2.ONE
@@ -117,12 +130,35 @@ func input_and_zoom() -> void:
  key(KEY_D,true)
  await frames()
  camera.call("_process",0.1)
- var distance: float = camera.position.distance_to(MapCatalog.CENTER)
- camera.position = MapCatalog.CENTER
- GameSettings.set_value("camera_speed",2.0,false)
- camera.call("_process",0.1)
  key(KEY_D,false)
- check(distance>0 and is_equal_approx(camera.position.distance_to(MapCatalog.CENTER),distance*2.0),"existing camera speed multiplier preserved")
+ check(camera.position.is_equal_approx(MapCatalog.CENTER),"WASD 不再移动镜头")
+ camera.zoom = Vector2.ONE
+ camera.set("target_zoom",1.0)
+ camera.position = MapCatalog.CENTER
+ camera.set_process(true)
+ await frames(3)
+ var gesture_position: Vector2 = Vector2(900,300)
+ var gesture: InputEventMagnifyGesture = InputEventMagnifyGesture.new()
+ gesture.factor = 1.25
+ gesture.position = gesture_position
+ var anchor_offset: Vector2 = gesture_position-Vector2(viewport.size)*0.5
+ var initial_anchor: Vector2 = camera.get_screen_center_position()+anchor_offset/camera.zoom.x
+ camera.call("_unhandled_input",gesture)
+ check(is_equal_approx(float(camera.get("target_zoom")),1.25),"触控板捏合放大更新目标缩放")
+ await frames(42)
+ var anchored_world: Vector2 = camera.get_screen_center_position()+anchor_offset/camera.zoom.x
+ var anchor_error: float = anchored_world.distance_to(initial_anchor)
+ check(anchor_error<0.5,"触控板缩放保持手势位置为缩放锚点 error="+str(anchor_error)+" world="+str(anchored_world)+" expected="+str(initial_anchor))
+ var previous_zoom: float = float(camera.get("target_zoom"))
+ gesture.factor = 0.8
+ gesture.position = Vector2(400,360)
+ camera.call("_unhandled_input",gesture)
+ check(is_equal_approx(float(camera.get("target_zoom")),previous_zoom*0.8),"触控板捏合缩小更新目标缩放")
+ await frames(42)
+ camera.set_process(false)
+ camera.zoom = Vector2.ONE
+ camera.set("target_zoom",1.0)
+ camera.position = MapCatalog.CENTER
  GameSettings.set_value("camera_speed",1.0,false)
  camera.zoom = Vector2.ONE*0.68
  camera.set("target_zoom",1.4)
@@ -148,6 +184,11 @@ func input_and_zoom() -> void:
  wheel.pressed = true
  camera.call("_unhandled_input",wheel)
  check(camera.get("target_zoom")==original_zoom,"matrix also blocks wheel operations")
+ var blocked_gesture: InputEventMagnifyGesture = InputEventMagnifyGesture.new()
+ blocked_gesture.factor=1.25
+ blocked_gesture.position=Vector2(900,300)
+ camera.call("_unhandled_input",blocked_gesture)
+ check(camera.get("target_zoom")==original_zoom,"matrix also blocks touchpad zoom")
  host.hud.matrix_open = false
  for multiline: bool in [false,true]:
   var editor: Control = TextEdit.new() if multiline else LineEdit.new()
@@ -161,6 +202,8 @@ func input_and_zoom() -> void:
   check(legal_position(),"text focus maintains bounds "+str(multiline))
   camera.call("_unhandled_input",wheel)
   check(camera.get("target_zoom")==original_zoom,"text focus blocks zoom "+str(multiline))
+  camera.call("_unhandled_input",blocked_gesture)
+  check(camera.get("target_zoom")==original_zoom,"text focus blocks touchpad zoom "+str(multiline))
   editor.queue_free()
   await frames()
  await stability("matrix/text resize recovery")

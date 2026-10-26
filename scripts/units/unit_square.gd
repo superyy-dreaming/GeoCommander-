@@ -4,6 +4,8 @@ func _init() -> void:
  unit_type = "square"
 
 func tick_unit(_delta: float) -> void:
+ if handle_manual_tick():
+  return
  if not scripted_control:
   basic_attack()
   automatic_skill()
